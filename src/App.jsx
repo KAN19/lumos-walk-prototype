@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
 import SpotsSidebar from './components/SpotsSidebar';
+import RoutePlannerSidebar from './components/RoutePlannerSidebar';
 import MapComponent from './components/MapComponent';
 import TimeScrubber from './components/TimeScrubber';
 import SunBathModal from './components/SunBathModal';
 import { SUNNY_AREAS, DEFAULT_USER_LOCATION } from './data/sunnySpotsLodz';
 import { generateSurroundingSpots } from './services/localSunSpotsService';
 import { isUserInSpotArea, getPolygonCentroid } from './utils/geoUtils';
+import {
+  PRESET_ROUTER_LOCATIONS,
+  calculateDualRoutes
+} from './services/sunPathRoutingService';
 import confetti from 'canvas-confetti';
 import {
   getCompassSolarPosition,
@@ -22,8 +27,30 @@ export default function App() {
   const [weather, setWeather] = useState(DEFAULT_WEATHER);
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION);
 
-  // Active Sun-Soaking Session State:
-  // { spot, elapsedSeconds, isRunning, isCompleted, isModalOpen }
+  // Active Mode: 'router' (Feature 1: Sun Path A->B) or 'spots' (Feature 2: Sunny Benches)
+  const [activeMode, setActiveMode] = useState('router');
+
+  // =========================================================================
+  // FEATURE 1: SUN PATH WALKING ROUTER STATE
+  // =========================================================================
+  const [startLocation, setStartLocation] = useState({
+    id: 'current_gps',
+    name: '📍 My Current Location',
+    coordinates: DEFAULT_USER_LOCATION
+  });
+
+  const [destinationLocation, setDestinationLocation] = useState(
+    PRESET_ROUTER_LOCATIONS.find((l) => l.id === 'manufaktura') || PRESET_ROUTER_LOCATIONS[2]
+  );
+
+  const [routeData, setRouteData] = useState(null);
+  const [selectedRouteType, setSelectedRouteType] = useState('sunny'); // 'sunny' | 'shortest'
+  const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
+  const [isPickingMapPoint, setIsPickingMapPoint] = useState(null); // null | 'start' | 'dest'
+
+  // =========================================================================
+  // FEATURE 2: ACTIVE SUN-SOAKING SESSION STATE
+  // =========================================================================
   const [activeSession, setActiveSession] = useState(null);
 
   // Poll live weather on mount
@@ -44,12 +71,26 @@ export default function App() {
     return () => clearInterval(clockTimer);
   }, []);
 
+  // Sync Start Location with User GPS if start is set to 'current_gps'
+  useEffect(() => {
+    if (startLocation?.id === 'current_gps') {
+      setStartLocation((prev) => ({
+        ...prev,
+        coordinates: userLocation
+      }));
+    }
+  }, [userLocation]);
+
   // Request actual user geolocation if available
   const handleLocateMe = () => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setUserLocation([pos.coords.longitude, pos.coords.latitude]);
+          const loc = [pos.coords.longitude, pos.coords.latitude];
+          setUserLocation(loc);
+          if (startLocation?.id === 'current_gps') {
+            setStartLocation((prev) => ({ ...prev, coordinates: loc }));
+          }
         },
         (err) => {
           console.warn('Geolocation denied or unavailable, keeping central Piotrkowska position:', err);
@@ -108,20 +149,50 @@ export default function App() {
     return map;
   }, [allSpots, effectiveDate]);
 
-  // Real-time Geofence calculation for active Sun Session:
-  // Evaluates whether current userLocation is inside activeSession.spot area
+  // =========================================================================
+  // ROUTING CALCULATION ENGINE (FEATURE 1: SHORT VS SUNNY ROUTE)
+  // =========================================================================
+  useEffect(() => {
+    if (!startLocation?.coordinates || !destinationLocation?.coordinates) return;
+
+    let isCurrent = true;
+    setIsLoadingRoutes(true);
+
+    calculateDualRoutes(startLocation.coordinates, destinationLocation.coordinates, solarPos)
+      .then((data) => {
+        if (isCurrent) {
+          setRouteData(data);
+          setIsLoadingRoutes(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to compute dual routes:', err);
+        if (isCurrent) setIsLoadingRoutes(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [
+    startLocation?.coordinates?.[0],
+    startLocation?.coordinates?.[1],
+    destinationLocation?.coordinates?.[0],
+    destinationLocation?.coordinates?.[1],
+    solarPos.azimuthDeg
+  ]);
+
+  // Real-time Geofence calculation for active Sun Session (Feature 2)
   const sessionGeofence = useMemo(() => {
     if (!activeSession?.spot) return { isInside: false, distanceMeters: 999 };
     return isUserInSpotArea(userLocation, activeSession.spot);
   }, [userLocation, activeSession?.spot]);
 
-  // CLINICAL EXPOSURE TIMER ENGINE:
+  // CLINICAL EXPOSURE TIMER ENGINE (FEATURE 2)
   // "Only when the user is on the selected area then it counts the exposure time."
   useEffect(() => {
     if (!activeSession || !activeSession.isRunning || activeSession.isCompleted) return;
 
     const timer = setInterval(() => {
-      // Strict geofence requirement: Only increment seconds if user is verified in the sunlit area!
       if (sessionGeofence.isInside) {
         setActiveSession((prev) => {
           if (!prev || !prev.isRunning || prev.isCompleted) return prev;
@@ -129,7 +200,6 @@ export default function App() {
           const TARGET_SECONDS = 15 * 60; // 15 mins
 
           if (nextSec >= TARGET_SECONDS) {
-            // Trigger victory celebration confetti
             confetti({
               particleCount: 80,
               spread: 70,
@@ -150,7 +220,52 @@ export default function App() {
     return () => clearInterval(timer);
   }, [activeSession?.isRunning, activeSession?.isCompleted, sessionGeofence.isInside]);
 
-  // Session Control Handlers
+  // Route Planning Handlers
+  const handleSelectStart = (location) => {
+    if (location.id === 'current_gps') {
+      setStartLocation({
+        id: 'current_gps',
+        name: '📍 My Current Location',
+        coordinates: userLocation
+      });
+    } else {
+      setStartLocation(location);
+    }
+  };
+
+  const handleSelectDestination = (location) => {
+    setDestinationLocation(location);
+  };
+
+  const handleSwapLocations = () => {
+    const prevStart = startLocation;
+    const prevDest = destinationLocation;
+    setStartLocation(prevDest);
+    setDestinationLocation(prevStart);
+  };
+
+  const handleStartPickOnMap = (targetType) => {
+    setIsPickingMapPoint((prev) => (prev === targetType ? null : targetType));
+  };
+
+  const handleMapPointPicked = (coords, targetType) => {
+    if (targetType === 'start') {
+      setStartLocation({
+        id: `custom_start_${Math.round(coords[0] * 1000)}`,
+        name: `📍 Selected Start (${coords[1].toFixed(4)}, ${coords[0].toFixed(4)})`,
+        coordinates: coords
+      });
+    } else if (targetType === 'dest') {
+      setDestinationLocation({
+        id: `custom_dest_${Math.round(coords[0] * 1000)}`,
+        name: `🏁 Selected Destination (${coords[1].toFixed(4)}, ${coords[0].toFixed(4)})`,
+        coordinates: coords
+      });
+    }
+    setIsPickingMapPoint(null);
+  };
+
+  // Spot Session Handlers (Feature 2)
   const handleStartSunSession = (spot) => {
     setSelectedSpotId(spot.id);
     setActiveSession({
@@ -177,7 +292,6 @@ export default function App() {
     const target = spot || activeSession?.spot;
     if (!target) return;
     const [lng, lat] = target.coordinates || userLocation;
-    // Move user ~85 meters away
     setUserLocation([lng + 0.00095, lat + 0.00065]);
   };
 
@@ -201,7 +315,7 @@ export default function App() {
     });
   };
 
-  // Handle scrubber changes
+  // Scrubber changes
   const handleScrubberChange = (minutes) => {
     setSimulatedMinutes(minutes);
   };
@@ -210,12 +324,11 @@ export default function App() {
     setSimulatedMinutes(null);
   };
 
-  // Convert current real time to minutes from midnight for scrubber initialization
   const currentMinutesFromMidnight = realTime.getHours() * 60 + realTime.getMinutes();
 
   return (
     <div className="app-container">
-      {/* Top Navbar */}
+      {/* Top Navbar with Mode Switcher */}
       <Navbar
         weather={weather}
         solarPos={solarPos}
@@ -223,22 +336,42 @@ export default function App() {
         simulatedTime={simulatedMinutes !== null ? effectiveDate : null}
         isScrubberOpen={isScrubberOpen}
         onToggleScrubber={() => setIsScrubberOpen((prev) => !prev)}
+        activeMode={activeMode}
+        onChangeMode={(newMode) => setActiveMode(newMode)}
       />
 
       {/* Main Workspace (Sidebar + Map) */}
       <main className="main-workspace">
-        <SpotsSidebar
-          spots={allSpots}
-          windowsBySpotId={windowsBySpotId}
-          selectedSpot={selectedSpot}
-          userLocation={userLocation}
-          activeSession={activeSession}
-          onSelectSpot={(spot) => setSelectedSpotId(spot.id)}
-          onStartSunBath={handleStartSunSession}
-          onTeleportToSpot={handleTeleportToSpot}
-        />
+        {activeMode === 'router' ? (
+          <RoutePlannerSidebar
+            startLocation={startLocation}
+            destinationLocation={destinationLocation}
+            onSelectStart={handleSelectStart}
+            onSelectDestination={handleSelectDestination}
+            onSwapLocations={handleSwapLocations}
+            routeData={routeData}
+            selectedRouteType={selectedRouteType}
+            onSelectRouteType={(type) => setSelectedRouteType(type)}
+            isLoadingRoutes={isLoadingRoutes}
+            userLocation={userLocation}
+            isPickingMapPoint={isPickingMapPoint}
+            onStartPickOnMap={handleStartPickOnMap}
+          />
+        ) : (
+          <SpotsSidebar
+            spots={allSpots}
+            windowsBySpotId={windowsBySpotId}
+            selectedSpot={selectedSpot}
+            userLocation={userLocation}
+            activeSession={activeSession}
+            onSelectSpot={(spot) => setSelectedSpotId(spot.id)}
+            onStartSunBath={handleStartSunSession}
+            onTeleportToSpot={handleTeleportToSpot}
+          />
+        )}
 
         <MapComponent
+          // Feature 2 Props
           spots={allSpots}
           windowsBySpotId={windowsBySpotId}
           selectedSpot={selectedSpot}
@@ -252,6 +385,16 @@ export default function App() {
           onOpenSessionModal={() => setActiveSession((prev) => prev ? { ...prev, isModalOpen: true } : null)}
           onTeleportToSpot={handleTeleportToSpot}
           onStepOutsideSpot={handleStepOutsideSpot}
+
+          // Feature 1 Router Props
+          activeMode={activeMode}
+          routeData={routeData}
+          selectedRouteType={selectedRouteType}
+          onSelectRouteType={(type) => setSelectedRouteType(type)}
+          startLocation={startLocation}
+          destinationLocation={destinationLocation}
+          isPickingMapPoint={isPickingMapPoint}
+          onMapPointPicked={handleMapPointPicked}
         />
       </main>
 
@@ -266,7 +409,7 @@ export default function App() {
         />
       )}
 
-      {/* Sun-Bath & Clinical Voucher Modal */}
+      {/* Sun-Bath & Clinical Voucher Modal (Feature 2) */}
       {activeSession && activeSession.isModalOpen && (
         <SunBathModal
           spot={activeSession.spot}
@@ -285,4 +428,5 @@ export default function App() {
     </div>
   );
 }
+
 

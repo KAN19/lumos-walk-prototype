@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import { LODZ_CENTER } from '../data/sunnySpotsLodz';
 import { spotsToGeoJson } from '../utils/geoUtils';
-import { Compass, Sun, Crosshair, MapPin, AlertTriangle } from 'lucide-react';
+import { Compass, Sun, Crosshair, MapPin, AlertTriangle, Footprints, Clock } from 'lucide-react';
 
 export default function MapComponent({
+  // Feature 2: Sunny Spots
   spots,
   windowsBySpotId,
   selectedSpot,
@@ -17,26 +18,43 @@ export default function MapComponent({
   sessionGeofence,
   onOpenSessionModal,
   onTeleportToSpot,
-  onStepOutsideSpot
+  onStepOutsideSpot,
+
+  // Feature 1: Sun Path Walking Router
+  activeMode = 'spots',
+  routeData,
+  selectedRouteType = 'sunny',
+  onSelectRouteType,
+  startLocation,
+  destinationLocation,
+  isPickingMapPoint = null,
+  onMapPointPicked
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef({});
   const userMarkerRef = useRef(null);
+  const endpointMarkersRef = useRef([]);
+  const routePillMarkersRef = useRef([]);
 
   const [isSimulatingGps, setIsSimulatingGps] = useState(false);
   const isSimulatingGpsRef = useRef(false);
+  const isPickingMapPointRef = useRef(isPickingMapPoint);
 
   useEffect(() => {
     isSimulatingGpsRef.current = isSimulatingGps;
     if (mapRef.current) {
-      mapRef.current.getCanvas().style.cursor = isSimulatingGps ? 'crosshair' : '';
+      mapRef.current.getCanvas().style.cursor = isSimulatingGps || isPickingMapPoint ? 'crosshair' : '';
     }
-  }, [isSimulatingGps]);
+  }, [isSimulatingGps, isPickingMapPoint]);
+
+  useEffect(() => {
+    isPickingMapPointRef.current = isPickingMapPoint;
+  }, [isPickingMapPoint]);
 
   // Generates a dynamic GeoJSON line representing the incoming solar ray vector towards the selected spot
   const getSunBeamGeoJson = useCallback(() => {
-    if (!selectedSpot || !selectedSpot.coordinates) {
+    if (!selectedSpot || !selectedSpot.coordinates || activeMode === 'router') {
       return { type: 'FeatureCollection', features: [] };
     }
     const [cx, cy] = selectedSpot.coordinates;
@@ -66,14 +84,17 @@ export default function MapComponent({
         }
       ]
     };
-  }, [selectedSpot, solarPos]);
+  }, [selectedSpot, solarPos, activeMode]);
 
   // Helper to add or update polygon GeoJSON layers
   const syncAreaLayers = useCallback((map) => {
     if (!map || !map.isStyleLoaded()) return;
 
-    // Only generates polygon for the selected spot when clicked
-    const geoJsonData = spotsToGeoJson(spots, windowsBySpotId, selectedSpot?.id);
+    // In router mode, hide spot area polygons to keep the map clean for routes
+    const geoJsonData = activeMode === 'spots'
+      ? spotsToGeoJson(spots, windowsBySpotId, selectedSpot?.id)
+      : { type: 'FeatureCollection', features: [] };
+
     const existingSource = map.getSource('sunny-areas-source');
 
     if (!existingSource) {
@@ -127,7 +148,181 @@ export default function MapComponent({
         beamSource.setData(getSunBeamGeoJson());
       }
     }
-  }, [spots, windowsBySpotId, selectedSpot, getSunBeamGeoJson]);
+  }, [spots, windowsBySpotId, selectedSpot, getSunBeamGeoJson, activeMode]);
+
+  // Helper to sync Route layers on MapLibre (Feature 1: Sun Path Router)
+  // Renders ALL candidate routes with vivid distinct colors and obsidian casings,
+  // bringing the SELECTED route to the top with a radiant glow aura and larger width!
+  const syncRouteLayers = useCallback((map) => {
+    if (!map || !map.isStyleLoaded()) return;
+
+    // Remove any previously rendered on-map midpoint markers
+    routePillMarkersRef.current.forEach((m) => m.remove());
+    routePillMarkersRef.current = [];
+
+    const routesList = (activeMode === 'router' && routeData?.allRoutes)
+      ? routeData.allRoutes
+      : (activeMode === 'router' && routeData)
+        ? [routeData.sunnyRoute, routeData.shortestRoute].filter(Boolean)
+        : [];
+
+    const allKnownTypes = ['sunny', 'park', 'shortest'];
+
+    if (routesList.length === 0) {
+      allKnownTypes.forEach((type) => {
+        const src = map.getSource(`route-${type}-source`);
+        if (src) {
+          src.setData({ type: 'FeatureCollection', features: [] });
+        }
+      });
+      return;
+    }
+
+    // 1. Render or update layers for each candidate route
+    routesList.forEach((r) => {
+      const type = r.routeType;
+      const isSelected = selectedRouteType === type;
+      const srcId = `route-${type}-source`;
+      const casingId = `route-${type}-casing`;
+      const glowId = `route-${type}-glow`;
+      const lineId = `route-${type}-line`;
+
+      const existingSource = map.getSource(srcId);
+      if (!existingSource) {
+        map.addSource(srcId, {
+          type: 'geojson',
+          data: r.geoJson
+        });
+
+        // Layer A: Dark Obsidian Casing (ensures route pops sharply against the dark map)
+        map.addLayer({
+          id: casingId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': '#020617',
+            'line-width': isSelected ? 12 : 7.5,
+            'line-opacity': 0.95
+          }
+        });
+
+        // Layer B: Ambient Solar / Electric Glow Halo
+        map.addLayer({
+          id: glowId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': r.glowColor || r.color,
+            'line-width': isSelected ? 22 : 8,
+            'line-opacity': isSelected ? 0.60 : 0.22,
+            'line-blur': isSelected ? 5 : 2
+          }
+        });
+
+        // Layer C: Core Radiant Route Line (Solid & distinctly visible for ALL candidate routes!)
+        map.addLayer({
+          id: lineId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': r.color,
+            'line-width': isSelected ? 7.5 : 4.5,
+            'line-opacity': isSelected ? 1.0 : 0.85
+          }
+        });
+
+        // Interactive Map Click & Hover Listeners on the line
+        map.on('click', lineId, (e) => {
+          e.originalEvent?.stopPropagation();
+          if (onSelectRouteType) onSelectRouteType(type);
+        });
+
+        map.on('mouseenter', lineId, () => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (map.getLayer(glowId)) {
+            map.setPaintProperty(glowId, 'line-opacity', 0.85);
+          }
+        });
+
+        map.on('mouseleave', lineId, () => {
+          map.getCanvas().style.cursor = '';
+          if (map.getLayer(glowId)) {
+            map.setPaintProperty(glowId, 'line-opacity', isSelected ? 0.60 : 0.22);
+          }
+        });
+      } else {
+        existingSource.setData(r.geoJson);
+        if (map.getLayer(casingId)) {
+          map.setPaintProperty(casingId, 'line-width', isSelected ? 12 : 7.5);
+        }
+        if (map.getLayer(glowId)) {
+          map.setPaintProperty(glowId, 'line-width', isSelected ? 22 : 8);
+          map.setPaintProperty(glowId, 'line-opacity', isSelected ? 0.60 : 0.22);
+          map.setPaintProperty(glowId, 'line-blur', isSelected ? 5 : 2);
+          map.setPaintProperty(glowId, 'line-color', r.glowColor || r.color);
+        }
+        if (map.getLayer(lineId)) {
+          map.setPaintProperty(lineId, 'line-width', isSelected ? 7.5 : 4.5);
+          map.setPaintProperty(lineId, 'line-opacity', isSelected ? 1.0 : 0.85);
+          map.setPaintProperty(lineId, 'line-color', r.color);
+        }
+      }
+    });
+
+    // 2. Clear sources of routes that are not in this calculation
+    allKnownTypes.forEach((type) => {
+      if (!routesList.some((r) => r.routeType === type)) {
+        const src = map.getSource(`route-${type}-source`);
+        if (src) {
+          src.setData({ type: 'FeatureCollection', features: [] });
+        }
+      }
+    });
+
+    // 3. Move the SELECTED route layers to the TOP of the layer stack
+    if (selectedRouteType) {
+      const activeCasing = `route-${selectedRouteType}-casing`;
+      const activeGlow = `route-${selectedRouteType}-glow`;
+      const activeLine = `route-${selectedRouteType}-line`;
+      [activeCasing, activeGlow, activeLine].forEach((lId) => {
+        if (map.getLayer(lId)) {
+          map.moveLayer(lId);
+        }
+      });
+    }
+
+    // 4. Place interactive On-Map Route Midpoint Badges (click-to-select directly on map)
+    routesList.forEach((r) => {
+      if (!r.midpoint) return;
+      const isSelected = selectedRouteType === r.routeType;
+
+      const el = document.createElement('div');
+      el.className = `on-map-route-badge ${r.routeType} ${isSelected ? 'selected' : ''}`;
+      el.title = `Click to select ${r.name}`;
+
+      const iconEmoji = r.routeType === 'sunny' ? '☀️' : r.routeType === 'park' ? '🌿' : '⏱️';
+      el.innerHTML = `
+        <span class="route-badge-icon">${iconEmoji}</span>
+        <span class="route-badge-time">${r.walkMinutes} min</span>
+        <span class="route-badge-sun">${r.sunPercent}% Sun</span>
+        ${isSelected ? '<span class="route-badge-check">✓</span>' : ''}
+      `;
+
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (onSelectRouteType) onSelectRouteType(r.routeType);
+      });
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat(r.midpoint)
+        .addTo(map);
+
+      routePillMarkersRef.current.push(marker);
+    });
+  }, [routeData, selectedRouteType, activeMode, onSelectRouteType]);
 
   // Initialize MapLibre
   useEffect(() => {
@@ -147,12 +342,18 @@ export default function MapComponent({
 
     map.on('load', () => {
       syncAreaLayers(map);
+      syncRouteLayers(map);
     });
 
-    // Map click handler for GPS placement when isSimulatingGps is active
+    // Map click handler for map point picker or GPS simulation
     map.on('click', (e) => {
+      const coords = [e.lngLat.lng, e.lngLat.lat];
+      if (isPickingMapPointRef.current && onMapPointPicked) {
+        onMapPointPicked(coords, isPickingMapPointRef.current);
+        return;
+      }
       if (isSimulatingGpsRef.current && onSetUserLocation) {
-        onSetUserLocation([e.lngLat.lng, e.lngLat.lat]);
+        onSetUserLocation(coords);
       }
     });
 
@@ -168,8 +369,79 @@ export default function MapComponent({
   useEffect(() => {
     if (mapRef.current) {
       syncAreaLayers(mapRef.current);
+      syncRouteLayers(mapRef.current);
     }
-  }, [syncAreaLayers]);
+  }, [syncAreaLayers, syncRouteLayers]);
+
+  // Fit bounds when route data changes in Router mode
+  useEffect(() => {
+    if (!mapRef.current || activeMode !== 'router' || !routeData) return;
+
+    const allCoords = [];
+    (routeData.allRoutes || [routeData.sunnyRoute, routeData.shortestRoute]).forEach((r) => {
+      if (r?.rawCoordinates) {
+        allCoords.push(...r.rawCoordinates);
+      }
+    });
+    if (allCoords.length < 2) return;
+
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
+
+    allCoords.forEach(([lng, lat]) => {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    });
+
+    mapRef.current.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat]
+      ],
+      {
+        padding: { top: 90, bottom: 95, left: 70, right: 70 },
+        duration: 900,
+        maxZoom: 16.5
+      }
+    );
+  }, [routeData, activeMode]);
+
+  // Manage Origin (A) and Destination (B) endpoint markers on the map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    endpointMarkersRef.current.forEach((m) => m.remove());
+    endpointMarkersRef.current = [];
+
+    if (activeMode !== 'router') return;
+
+    if (startLocation?.coordinates) {
+      const elA = document.createElement('div');
+      elA.className = 'route-endpoint-marker start';
+      elA.innerText = 'A';
+      elA.title = `Start: ${startLocation.name}`;
+      const markerA = new maplibregl.Marker({ element: elA })
+        .setLngLat(startLocation.coordinates)
+        .addTo(map);
+      endpointMarkersRef.current.push(markerA);
+    }
+
+    if (destinationLocation?.coordinates) {
+      const elB = document.createElement('div');
+      elB.className = 'route-endpoint-marker dest';
+      elB.innerText = 'B';
+      elB.title = `Destination: ${destinationLocation.name}`;
+      const markerB = new maplibregl.Marker({ element: elB })
+        .setLngLat(destinationLocation.coordinates)
+        .addTo(map);
+      endpointMarkersRef.current.push(markerB);
+    }
+  }, [activeMode, startLocation, destinationLocation]);
 
   // Update User Location GPS Pin on map (with DRAGGABLE capability!)
   useEffect(() => {
@@ -227,6 +499,9 @@ export default function MapComponent({
     Object.values(markersRef.current).forEach((m) => m.remove());
     markersRef.current = {};
 
+    // In router mode, hide spot centroid markers to keep routes clear
+    if (activeMode === 'router') return;
+
     spots.forEach((spot) => {
       const win = windowsBySpotId[spot.id];
       const isSunny = win?.status === 'sunny';
@@ -279,11 +554,11 @@ export default function MapComponent({
 
       markersRef.current[spot.id] = marker;
     });
-  }, [spots, windowsBySpotId, selectedSpot, onSelectSpot]);
+  }, [spots, windowsBySpotId, selectedSpot, onSelectSpot, activeMode]);
 
   // Smoothly pan and fly when spot is selected via icon
   useEffect(() => {
-    if (!mapRef.current || !selectedSpot) return;
+    if (!mapRef.current || !selectedSpot || activeMode === 'router') return;
 
     mapRef.current.flyTo({
       center: selectedSpot.coordinates,
@@ -297,7 +572,7 @@ export default function MapComponent({
     if (marker) {
       marker.togglePopup();
     }
-  }, [selectedSpot]);
+  }, [selectedSpot, activeMode]);
 
   // Handle Locate Me click
   const handleLocateMeClick = () => {
@@ -346,7 +621,7 @@ export default function MapComponent({
       </div>
 
       {/* GPS Simulation Active Instruction Banner */}
-      {isSimulatingGps && (
+      {isSimulatingGps && !isPickingMapPoint && (
         <div className="gps-simulation-banner" id="banner-gps-sim-active">
           <MapPin size={14} color="#34d399" />
           <span>
@@ -358,8 +633,58 @@ export default function MapComponent({
         </div>
       )}
 
-      {/* Active Sunlit Area Overlay Badge when an icon is clicked */}
-      {selectedSpot && (
+      {/* Map Point Picker Active Banner */}
+      {isPickingMapPoint && (
+        <div className="gps-simulation-banner" style={{ borderColor: '#38bdf8' }} id="banner-point-picker-active">
+          <MapPin size={14} color="#38bdf8" />
+          <span>
+            <strong>Pick on Map:</strong> Click anywhere on the map to set your {isPickingMapPoint === 'start' ? 'Start (Origin)' : 'Destination'} location.
+          </span>
+        </div>
+      )}
+
+      {/* Router Comparison Banner on Map (Feature 1) */}
+      {activeMode === 'router' && routeData && (
+        <div className="map-route-comparison-hud" id="hud-route-comparison">
+          {(routeData.allRoutes || [routeData.sunnyRoute, routeData.shortestRoute]).filter(Boolean).map((r, idx) => {
+            const isSelected = selectedRouteType === r.routeType;
+            const iconEmoji = r.routeType === 'sunny' ? '☀️' : r.routeType === 'park' ? '🌿' : '⏱️';
+            return (
+              <React.Fragment key={r.routeType}>
+                {idx > 0 && <div className="route-hud-divider" />}
+                <button
+                  className={`route-hud-pill ${r.routeType} ${isSelected ? 'active-hud' : ''}`}
+                  onClick={() => onSelectRouteType && onSelectRouteType(r.routeType)}
+                  title={`Click to select ${r.name}`}
+                  style={{
+                    background: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
+                    border: isSelected ? `1px solid ${r.color}` : '1px solid transparent',
+                    color: isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.7)',
+                    cursor: 'pointer',
+                    borderRadius: '9999px',
+                    padding: '3px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '0.78rem',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <span>{iconEmoji}</span>
+                  <span>
+                    <strong style={{ color: r.color }}>{r.name.split(' (')[0]}:</strong>{' '}
+                    <strong>{r.sunPercent}% Sun</strong> ({r.walkMinutes} min)
+                  </span>
+                  {isSelected && <span style={{ color: '#34d399', fontWeight: 800, fontSize: '0.75rem' }}>✓</span>}
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Active Sunlit Area Overlay Badge when an icon is clicked (Feature 2) */}
+      {activeMode === 'spots' && selectedSpot && (
         <div className="active-area-badge" id="badge-active-sunlit-area">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div className="active-area-icon">
@@ -458,4 +783,5 @@ export default function MapComponent({
     </div>
   );
 }
+
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sun, Cloud, Compass, Clock, Sliders, AlertTriangle } from 'lucide-react';
+import { Sun, Cloud, Compass, Clock, Sliders, AlertTriangle, Footprints } from 'lucide-react';
 
 export default function Navbar({
   weather,
@@ -7,7 +7,9 @@ export default function Navbar({
   sunTimes,
   simulatedTime,
   isScrubberOpen,
-  onToggleScrubber
+  onToggleScrubber,
+  activeMode,
+  onChangeMode
 }) {
   const isSimulating = Boolean(simulatedTime);
   const displayTime = simulatedTime
@@ -27,6 +29,28 @@ export default function Navbar({
             <span className="brand-tag">Łódź Pilot</span>
           </div>
         </div>
+      </div>
+
+      {/* Mode Switcher Tabs: Mode 1 (Sun Path) vs Mode 2 (Sunny Spots) */}
+      <div className="app-mode-switch-wrapper" id="nav-mode-switcher">
+        <button
+          id="tab-mode-router"
+          className={`mode-tab-btn ${activeMode === 'router' ? 'active' : ''}`}
+          onClick={() => onChangeMode('router')}
+          title="Mode 1: Sun Path — A to B Walking Router (Shortest vs Sunny Path)"
+        >
+          <Footprints size={15} />
+          <span>Sun Path Router</span>
+        </button>
+        <button
+          id="tab-mode-spots"
+          className={`mode-tab-btn ${activeMode === 'spots' ? 'active' : ''}`}
+          onClick={() => onChangeMode('spots')}
+          title="Mode 2: Sunny Spots — Stationary Benches & Sun Window Countdowns"
+        >
+          <Sun size={15} />
+          <span>Sunny Spots</span>
+        </button>
       </div>
 
       {/* Real-time Solar & Microclimate Metrics */}
