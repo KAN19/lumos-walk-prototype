@@ -1,99 +1,98 @@
 import React from 'react';
-import { Sun, Cloud, Compass, Clock, Sliders, AlertTriangle, Footprints } from 'lucide-react';
+import { Sun, Footprints, Compass, SearchCheck, Key, Layers } from 'lucide-react';
 
 export default function Navbar({
-  weather,
   solarPos,
-  sunTimes,
-  simulatedTime,
-  isScrubberOpen,
-  onToggleScrubber,
   activeMode,
-  onChangeMode
+  onChangeMode,
+  hasMapboxToken = false,
+  onOpenApiModal,
+  osmDataStatus = 'live'
 }) {
-  const isSimulating = Boolean(simulatedTime);
-  const displayTime = simulatedTime
-    ? simulatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
   return (
     <header className="navbar">
-      {/* Brand & City Pilot */}
+      {/* Brand & Subtitle */}
       <div className="brand-section">
         <div className="brand-logo-icon">
-          <Sun size={22} color="#111827" strokeWidth={2.5} />
+          <Sun size={20} color="#111827" strokeWidth={2.5} />
         </div>
-        <div>
+        <div className="brand-text-group">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="brand-name">LumosWalk</span>
-            <span className="brand-tag">Łódź Pilot</span>
+            <span className="brand-tag">Łódź OSM 3D</span>
           </div>
+          <span className="brand-subtitle-text">
+            OSM Urban Spatial &amp; Shadow Inspector
+          </span>
         </div>
       </div>
 
-      {/* Mode Switcher Tabs: Mode 1 (Sun Path) vs Mode 2 (Sunny Spots) */}
+      {/* Mode Switcher Tabs (100% English) */}
       <div className="app-mode-switch-wrapper" id="nav-mode-switcher">
+        <button
+          id="tab-mode-inspector"
+          className={`mode-tab-btn ${activeMode === 'inspector' ? 'active' : ''}`}
+          onClick={() => onChangeMode('inspector')}
+          title="Inspect 3D OSM Buildings, Pedestrian Sidewalks & Ground Shadows"
+        >
+          <SearchCheck size={14} />
+          <span>Spatial Inspector</span>
+        </button>
+
         <button
           id="tab-mode-router"
           className={`mode-tab-btn ${activeMode === 'router' ? 'active' : ''}`}
           onClick={() => onChangeMode('router')}
-          title="Mode 1: Sun Path — A to B Walking Router (Shortest vs Sunny Path)"
+          title="Compare Sunlight-Maximized vs Shortest Walking Routes"
         >
-          <Footprints size={15} />
+          <Footprints size={14} />
           <span>Sun Path Router</span>
         </button>
+
         <button
           id="tab-mode-spots"
           className={`mode-tab-btn ${activeMode === 'spots' ? 'active' : ''}`}
           onClick={() => onChangeMode('spots')}
-          title="Mode 2: Sunny Spots — Stationary Benches & Sun Window Countdowns"
+          title="Explore Sunlit Benches, Plazas & Sun Windows"
         >
-          <Sun size={15} />
+          <Sun size={14} />
           <span>Sunny Spots</span>
         </button>
       </div>
 
-      {/* Real-time Solar & Microclimate Metrics */}
+      {/* Right Status Readouts: Sun Position + OSM Data Status */}
       <div className="nav-metrics">
-        {/* Solar Ephemeris readout */}
-        <div className="metric-chip solar" title="Current Solar Elevation & Azimuth in Łódź">
-          <Compass size={15} color="#f59e0b" />
-          <span>Sun: <strong>{solarPos.elevationDeg}° elev</strong> / {solarPos.azimuthDeg}° az</span>
-        </div>
-
-        {/* Weather & Cloud Cover */}
-        <div className="metric-chip" title="Real-time Open-Meteo Feed for Central Łódź">
-          <Cloud size={15} color="#94a3b8" />
-          <span>{weather.temperature}°C • Cloud: <strong>{weather.cloudCover}%</strong></span>
-        </div>
-
-        {/* Polish Szaruga Alert Pill */}
-        {weather.isSzaruga ? (
-          <div className="metric-chip szaruga-alert" title="Cloud cover exceeds 80%. System pivots to high Sky View Factor open spaces.">
-            <AlertTriangle size={15} color="#ef4444" />
-            <span><strong>Szaruga Mode:</strong> High-Sky Parks</span>
-          </div>
-        ) : (
-          <div className="metric-chip" style={{ borderColor: 'rgba(16, 185, 129, 0.3)', color: '#6ee7b7' }}>
-            <span>DNI: <strong>{weather.directIrradiance} W/m²</strong></span>
-          </div>
-        )}
-
-        {/* Current / Simulated Time Display */}
-        <div className="metric-chip" style={{ fontFamily: 'var(--font-mono)' }}>
-          <Clock size={14} color="#f59e0b" />
-          <span>{isSimulating ? 'Simulated:' : 'Live:'} <strong>{displayTime}</strong></span>
-        </div>
-
-        {/* Scrubber Toggle Button */}
-        <button
-          id="btn-toggle-time-scrubber"
-          className={`time-scrub-btn ${isScrubberOpen ? 'active' : ''}`}
-          onClick={onToggleScrubber}
-          title="Scrub time across the day to simulate shadow movement"
+        <div
+          className="metric-chip solar"
+          title="Active Solar Elevation & Azimuth Angle for Shadow Raycasting"
         >
-          <Sliders size={15} />
-          <span>{isScrubberOpen ? 'Close Scrubber' : 'Simulate Sun Hours'}</span>
+          <Compass size={14} color="#f59e0b" />
+          <span>
+            Sun Position: <strong>{solarPos.elevationDeg}° elev</strong> /{' '}
+            <strong>{solarPos.azimuthDeg}° az</strong>
+          </span>
+        </div>
+
+        <div
+          className="metric-chip osm-live-chip"
+          title="OpenStreetMap 3D Building Envelopes & Pedestrian Network Active"
+        >
+          <Layers size={13} color="#10b981" />
+          <span>
+            OSM Data: <strong>Live</strong>
+          </span>
+          <span className="status-dot green" />
+        </div>
+
+        <button
+          id="btn-mapbox-api"
+          className={`api-key-nav-btn ${hasMapboxToken ? 'connected' : ''}`}
+          onClick={onOpenApiModal}
+          title="Configure Mapbox Places API Token (Optional)"
+          style={{ padding: '6px 10px' }}
+        >
+          <Key size={13} />
+          <span className={`status-dot ${hasMapboxToken ? 'green' : 'amber'}`} />
         </button>
       </div>
     </header>
