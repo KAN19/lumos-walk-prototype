@@ -36,6 +36,16 @@ const HOUR_LABELS = {
 
 const WEEKLY_VOUCHERS = [
   {
+    id: 'voucher-1h',
+    requiredMinutes: 60,
+    requiredLabel: '1h 00m',
+    title: 'Free Classic Hot Dog or Hot Drink',
+    venue: 'Żabka Café • Over 120 stores across Łódź',
+    code: 'ZABKA-1HR-HOTDOG',
+    emoji: '🌭',
+    partner: 'Żabka'
+  },
+  {
     id: 'voucher-2h',
     requiredMinutes: 120,
     requiredLabel: '2h 00m',
@@ -52,6 +62,16 @@ const WEEKLY_VOUCHERS = [
     venue: 'Owoce i Warzywa • Traugutta 1',
     code: 'LUMOS-3HR-ROLL',
     emoji: '🥐'
+  },
+  {
+    id: 'voucher-3h30',
+    requiredMinutes: 210,
+    requiredLabel: '3h 30m',
+    title: 'Free Wycisk Juice + Protein Snack',
+    venue: 'Żabka Nano & Żabka • Piotrkowska / Manufaktura',
+    code: 'ZABKA-WYCISK-SNACK',
+    emoji: '🧃',
+    partner: 'Żabka'
   },
   {
     id: 'voucher-5h',
@@ -80,6 +100,25 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState(1);
   const [brandTapCount, setBrandTapCount] = useState(0);
 
+  // Splash Screen & User Name Onboarding State
+  const [showSplash, setShowSplash] = useState(true);
+  const [splashFading, setSplashFading] = useState(false);
+  const [userName, setUserName] = useState(() => {
+    try {
+      return localStorage.getItem('lumos_user_name') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [isOnboarding, setIsOnboarding] = useState(false);
+  const [nameInput, setNameInput] = useState(() => {
+    try {
+      return localStorage.getItem('lumos_user_name') || '';
+    } catch {
+      return '';
+    }
+  });
+
   // Mutually Exclusive Active Session State: 'idle' | 'path' | 'spot'
   const [sessionMode, setSessionMode] = useState('idle');
   const [sessionMinutes, setSessionMinutes] = useState(0);
@@ -102,6 +141,7 @@ export default function App() {
   });
   const [gpsToastMessage, setGpsToastMessage] = useState(null);
   const [gpsRecenterTrigger, setGpsRecenterTrigger] = useState(0);
+  const [lodzCenterNavTrigger, setLodzCenterNavTrigger] = useState(0);
 
   // Live OSM 3D Buildings, Trees & Sidewalks (for Raycasting & Debug Screen)
   const [osmSpatialData, setOsmSpatialData] = useState({
@@ -121,17 +161,17 @@ export default function App() {
     name: 'My Current Location',
     coordinates: DEFAULT_USER_LOCATION
   });
-  const [destinationLocation, setDestinationLocation] = useState(
-    PRESET_ROUTER_LOCATIONS.find((l) => l.id === 'manufaktura') || PRESET_ROUTER_LOCATIONS[2]
-  );
+  const [destinationLocation, setDestinationLocation] = useState(null);
   const [routeData, setRouteData] = useState(null);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [selectedRouteType, setSelectedRouteType] = useState('sunny');
   const [isEditingRoute, setIsEditingRoute] = useState(false);
   const [isPickingMapPoint, setIsPickingMapPoint] = useState(null);
   const [showRouter3dMap, setShowRouter3dMap] = useState(false); // ON/OFF toggle for 2.5D/3D buildings & trees on Sunlight Path
-  // Optional time override in Route Editor if user wants to preview daytime routes at night
-  const [routeTimeMode, setRouteTimeMode] = useState('live'); // 'live' | 'daytime_preview'
-  const [routePreviewHour, setRoutePreviewHour] = useState(13);
+  // Screen 2 (Sunlight Path) Solar Time Selection State
+  const [routeTimeHour, setRouteTimeHour] = useState(12);
+  const [routeTimeIsNow, setRouteTimeIsNow] = useState(true);
+  const [appliedRouteTime, setAppliedRouteTime] = useState({ isNow: true, hour: 12 });
 
   // Screen 5 (Hidden Debug Street Raycast Tool) State
   const [debugTimeMode, setDebugTimeMode] = useState('live'); // 'live' | 'custom'
@@ -140,6 +180,7 @@ export default function App() {
   const [debugInspectedPoint, setDebugInspectedPoint] = useState([19.4574, 51.7678]);
   const [activePilotZoneId, setActivePilotZoneId] = useState('zone-1-piotrkowska');
   const [debugFocusCoord, setDebugFocusCoord] = useState(null);
+  const [showDebug3dMap, setShowDebug3dMap] = useState(true); // ON/OFF toggle for 3D buildings & tree crowns on Debug Screen
 
   // Show temporary GPS toast
   const triggerGpsToast = useCallback((msg) => {
@@ -282,14 +323,72 @@ export default function App() {
     return () => clearInterval(timer);
   }, [sessionMode]);
 
-  // 1. LIVE Real-Time Solar Position in Łódź (Used by Screen 1 & Screen 2 Sunlight Path by default!)
+  // Splash Screen Timer on Page Load / Reload:
+  // Shows animated splash for 1.3s, fades out over 300ms, then prompts for name if not set yet
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => {
+      setSplashFading(true);
+    }, 1300);
+
+    const finishTimer = setTimeout(() => {
+      setShowSplash(false);
+      setSplashFading(false);
+      if (!userName || !userName.trim()) {
+        setIsOnboarding(true);
+      }
+    }, 1600);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(finishTimer);
+    };
+  }, [userName]);
+
+  const handleSaveName = (e) => {
+    if (e) e.preventDefault();
+    const trimmed = nameInput.trim();
+    if (!trimmed) return;
+    try {
+      localStorage.setItem('lumos_user_name', trimmed);
+    } catch {}
+    setUserName(trimmed);
+    setIsOnboarding(false);
+  };
+
+  // Dynamic Greeting based on current local hour in Łódź
+  const greetingWord = useMemo(() => {
+    const h = liveClock.getHours();
+    if (h >= 5 && h < 12) return 'Good morning';
+    if (h >= 12 && h < 18) return 'Good afternoon';
+    return 'Good evening';
+  }, [liveClock]);
+
+  // 1. LIVE Real-Time Solar Position in Łódź (Used by Screen 1 by default)
   const liveSolarPos = useMemo(() => {
     return getCompassSolarPosition(liveClock, userLocation[1], userLocation[0]);
   }, [liveClock, userLocation]);
 
   // Solar Position used on Screen 2 (Sunlight Path):
-  // Always uses the real-time current clock in Łódź (`liveSolarPos`).
-  const routeSolarPos = liveSolarPos;
+  // Uses real-time current clock in Łódź by default, or the specific departure time chosen by the user
+  const routeSolarPos = useMemo(() => {
+    if (appliedRouteTime.isNow) {
+      return liveSolarPos;
+    }
+    const d = new Date();
+    d.setHours(appliedRouteTime.hour, 0, 0, 0);
+    const pos = getCompassSolarPosition(d, userLocation[1], userLocation[0]);
+    if (pos.elevationDeg <= 4 && appliedRouteTime.hour >= 8 && appliedRouteTime.hour <= 15) {
+      const hourOffset = appliedRouteTime.hour - 12.5;
+      const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
+      const syntheticAz = Math.round(185 + hourOffset * 15);
+      return {
+        ...pos,
+        elevationDeg: syntheticElev,
+        azimuthDeg: syntheticAz
+      };
+    }
+    return pos;
+  }, [appliedRouteTime, liveSolarPos, userLocation]);
 
   // 2. Scrubbed Time Solar Position (Used by Screen 3: "Sunny Spots at Specific Time")
   const scrubbedDate = useMemo(() => {
@@ -344,10 +443,24 @@ export default function App() {
   }, [debugInspectedPoint, debugSolarPos, osmSpatialData]);
 
   // All Sunny Spots in Łódź sorted by distance from User's GPS (Nearest First!)
+  // Enforces a minimum 140m spatial separation between spots to eliminate overlapping/colliding pins
   const sortedSpots = useMemo(() => {
     const localBenches = generateSurroundingSpots(userLocation, scrubbedSolarPos);
-    const combined = [...SUNNY_AREAS, ...localBenches];
-    return combined
+    const deduped = [];
+
+    // Prioritize curated major areas first, then add local benches only if they are >= 140m away
+    for (const spot of [...SUNNY_AREAS, ...localBenches]) {
+      const isDuplicateOrTooClose = deduped.some((existing) => {
+        if (existing.id === spot.id) return true;
+        const d = getDistanceMeters(existing.coordinates, spot.coordinates);
+        return d < 140; // 140m minimum spacing prevents pin overlap and visual collisions
+      });
+      if (!isDuplicateOrTooClose) {
+        deduped.push(spot);
+      }
+    }
+
+    return deduped
       .map((s) => ({
         ...s,
         distanceMeters: Math.round(getDistanceMeters(userLocation, s.coordinates))
@@ -393,37 +506,30 @@ export default function App() {
     return sortedSpots.filter((s) => windowsBySpotId[s.id]?.status === 'sunny').length;
   }, [sortedSpots, windowsBySpotId]);
 
-  // Calculate dual walking routes (Sunniest vs Shortest) using 3D Building + Tree Raycasting
-  // & <= +20% maximum detour constraint
-  useEffect(() => {
-    if (!startLocation?.coordinates || !destinationLocation?.coordinates) return;
-    let isCurrent = true;
-
-    calculateDualRoutes(
-      startLocation.coordinates,
-      destinationLocation.coordinates,
-      routeSolarPos,
-      osmSpatialData.buildings,
-      osmSpatialData.sidewalks
-    )
-      .then((data) => {
-        if (isCurrent && data) {
+  // Calculate dual walking routes (Sunniest vs Shortest) with live loading indicator
+  const executeRouteCalculation = useCallback(
+    async (start = startLocation, dest = destinationLocation, solar = routeSolarPos) => {
+      if (!start?.coordinates || !dest?.coordinates) return;
+      setIsCalculatingRoute(true);
+      try {
+        const data = await calculateDualRoutes(
+          start.coordinates,
+          dest.coordinates,
+          solar,
+          osmSpatialData.buildings,
+          osmSpatialData.sidewalks
+        );
+        if (data) {
           setRouteData(data);
         }
-      })
-      .catch(() => {});
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [
-    startLocation,
-    destinationLocation,
-    routeSolarPos.azimuthDeg,
-    routeSolarPos.elevationDeg,
-    osmSpatialData.buildings,
-    osmSpatialData.sidewalks
-  ]);
+      } catch (err) {
+        console.warn('Route calculation error:', err);
+      } finally {
+        setIsCalculatingRoute(false);
+      }
+    },
+    [startLocation, destinationLocation, routeSolarPos, osmSpatialData]
+  );
 
   // Total accumulated weekly minutes (base banked + active live session)
   const totalWeeklyMinutes = bankedMinutes + (sessionMode !== 'idle' ? sessionMinutes : 0);
@@ -478,19 +584,69 @@ export default function App() {
     } catch {}
   };
 
+  // Helper to compute solar position for a specific hour/now setting
+  const getSolarForRouteHour = useCallback(
+    (isNow, hour) => {
+      if (isNow) return liveSolarPos;
+      const d = new Date();
+      d.setHours(hour, 0, 0, 0);
+      const pos = getCompassSolarPosition(d, userLocation[1], userLocation[0]);
+      if (pos.elevationDeg <= 4 && hour >= 8 && hour <= 15) {
+        const hourOffset = hour - 12.5;
+        const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
+        const syntheticAz = Math.round(185 + hourOffset * 15);
+        return { ...pos, elevationDeg: syntheticElev, azimuthDeg: syntheticAz };
+      }
+      return pos;
+    },
+    [liveSolarPos, userLocation]
+  );
+
+  // Directly load route when user pins a location (start or destination) on map — no need to click Calculate Route!
   const handleMapPointPicked = (coords, pointType) => {
     const customLoc = {
       id: `custom_${Date.now()}`,
       name: `Pinned [${coords[1].toFixed(3)}, ${coords[0].toFixed(3)}]`,
       coordinates: coords
     };
+
+    let targetStart = startLocation;
+    let targetDest = destinationLocation;
+
     if (pointType === 'start') {
+      targetStart = customLoc;
       setStartLocation(customLoc);
+      if (!targetDest?.coordinates) {
+        targetDest =
+          PRESET_ROUTER_LOCATIONS.find((l) => l.id === 'manufaktura') ||
+          PRESET_ROUTER_LOCATIONS[2];
+        setDestinationLocation(targetDest);
+      }
     } else {
+      targetDest = customLoc;
       setDestinationLocation(customLoc);
+      if (!targetStart?.coordinates) {
+        targetStart = {
+          id: 'current_gps',
+          name: 'My Current Location',
+          coordinates: userLocation
+        };
+        setStartLocation(targetStart);
+      }
     }
+
     setIsPickingMapPoint(null);
     setIsEditingRoute(false);
+
+    setAppliedRouteTime({
+      isNow: routeTimeIsNow,
+      hour: routeTimeHour
+    });
+
+    const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
+
+    // Direct routing execution on map pin — no need to click Calculate Route!
+    executeRouteCalculation(targetStart, targetDest, solarForRoute);
   };
 
   // Step 1 -> Step 2 on Screen 3 (Sunny Spots): Click a spot to zoom into its Whole Sunlit Area Footprint
@@ -503,9 +659,86 @@ export default function App() {
     setViewingSpotArea(null);
   };
 
+  // Clicking outside a chosen spot on the map unselects it
+  const handleDeselectSpot = useCallback(() => {
+    setViewingSpotArea(null);
+    setSelectedSpotId(null);
+  }, []);
+
   const handleLocateUserOnSpotsMap = () => {
     setViewingSpotArea(null);
     requestRealGps(true);
+  };
+
+  // Launch Sunlight Path: clear previous route unless user is on an active walking session,
+  // and navigate camera directly to the center of Łódź
+  const handleLaunchSunlightPath = () => {
+    if (sessionMode !== 'path') {
+      setRouteData(null);
+      setDestinationLocation(null);
+      setIsEditingRoute(true);
+      setStartLocation((prev) =>
+        prev?.id === 'current_gps'
+          ? { ...prev, coordinates: userLocation }
+          : { id: 'current_gps', name: 'My Current Location', coordinates: userLocation }
+      );
+    }
+    setLodzCenterNavTrigger((prev) => prev + 1);
+    setActiveScreen(2);
+  };
+
+  // Launch Sunny Spots: unselect any previous spot and navigate directly to the center of Łódź
+  const handleLaunchSunnySpots = (hour = null) => {
+    if (hour !== null) {
+      setScrubbedHour(hour);
+    }
+    setViewingSpotArea(null);
+    setSelectedSpotId(null);
+    setLodzCenterNavTrigger((prev) => prev + 1);
+    setActiveScreen(3);
+  };
+
+  // Calculate Route button handler: triggers only when user clicks this button
+  // after choosing locations in dropdown selection box or adjusting sunlight time
+  const handleCalculateRoute = () => {
+    let targetDest = destinationLocation;
+    if (!targetDest?.coordinates) {
+      targetDest =
+        PRESET_ROUTER_LOCATIONS.find((l) => l.id === 'manufaktura') ||
+        PRESET_ROUTER_LOCATIONS[2];
+      setDestinationLocation(targetDest);
+    }
+
+    let targetStart = startLocation;
+    if (!targetStart?.coordinates) {
+      targetStart = {
+        id: 'current_gps',
+        name: 'My Current Location',
+        coordinates: userLocation
+      };
+      setStartLocation(targetStart);
+    }
+
+    setAppliedRouteTime({
+      isNow: routeTimeIsNow,
+      hour: routeTimeHour
+    });
+
+    const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
+
+    setIsEditingRoute(false);
+    executeRouteCalculation(targetStart, targetDest, solarForRoute);
+  };
+
+  const handleSelectQuickDestination = (loc) => {
+    setDestinationLocation(loc);
+    setIsEditingRoute(false);
+    setAppliedRouteTime({
+      isNow: routeTimeIsNow,
+      hour: routeTimeHour
+    });
+    const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
+    executeRouteCalculation(startLocation, loc, solarForRoute);
   };
 
   // Hidden Debug Screen trigger: tap brand header 3 times
@@ -542,7 +775,8 @@ export default function App() {
     startLocation?.id === 'current_gps'
       ? 'GPS'
       : startLocation?.name?.split(' (')[0] || 'Start';
-  const shortDestName = destinationLocation?.name?.split(' (')[0] || 'Manufaktura';
+  const shortDestName =
+    destinationLocation?.name?.split(' (')[0] || (isEditingRoute ? 'Select Destination' : 'Destination');
 
   const nearestSpot = sortedSpots[0];
   const moreNearbySpots = sortedSpots.slice(1, 7);
@@ -570,31 +804,134 @@ export default function App() {
 
       {/* Centered Mobile Viewport Frame */}
       <div className="v22-phone-frame">
-        {/* ==================== SCREEN 1: HOME DASHBOARD (NO MAP) ==================== */}
-        {activeScreen === 1 && (
-          <div className="v22-screen v22-home-screen">
-            <div className="v22-home-top-group">
-              {/* Minimal Top Bar (Tap Brand 3x to open Hidden Debug Screen) */}
-              <header className="v22-topbar">
-                <div
-                  className="v22-brand-row"
-                  onClick={handleBrandHeaderTap}
-                  style={{ cursor: 'pointer' }}
-                  title="LumosWalk (Tap 3x for Street Raycast Debugger)"
-                >
-                  <span className="v22-brand-dot" />
-                  <span className="v22-brand-title">LumosWalk</span>
+        {/* ==================== SPLASH SCREEN (ON RELOAD / FIRST ENTER) ==================== */}
+        {showSplash && (
+          <div className={`v22-splash-screen ${splashFading ? 'fade-out' : ''}`}>
+            <div className="v22-splash-content">
+              <div className="v22-splash-sun-wrap">
+                <div className="v22-splash-sun-glow" />
+                <div className="v22-splash-sun-icon">☀️</div>
+              </div>
+
+              <div className="v22-splash-text-group">
+                <h1 className="v22-splash-brand-title">LumosWalk</h1>
+                <p className="v22-splash-brand-sub">Winter Sunlight Navigator</p>
+                <span className="v22-splash-brand-city">Łódź • Poland</span>
+              </div>
+
+              <div className="v22-splash-footer">
+                <div className="v22-splash-spinner-dots">
+                  <span className="v22-splash-dot" />
+                  <span className="v22-splash-dot" />
+                  <span className="v22-splash-dot" />
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== ONBOARDING: USER NAME ENTRY SCREEN ==================== */}
+        {isOnboarding ? (
+          <div className="v22-screen v22-onboarding-screen">
+            <div className="v22-onboarding-inner">
+              <div className="v22-onboarding-hero">
+                <div className="v22-onboarding-sun-wrap">
+                  <span className="v22-onboarding-sun-emoji">☀️</span>
+                </div>
+                <h1 className="v22-onboarding-headline">Welcome to LumosWalk</h1>
+                <p className="v22-onboarding-description">
+                  Discover the warmest sunlit sidewalks, benches, and reward cafes in Łódź.
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveName} className="v22-onboarding-card">
+                <label htmlFor="v22-user-name-input" className="v22-onboarding-field-label">
+                  What should we call you?
+                </label>
+                <div className="v22-onboarding-input-wrap">
+                  <input
+                    id="v22-user-name-input"
+                    type="text"
+                    className="v22-onboarding-input"
+                    placeholder="Enter your name (e.g., Kiet)"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    autoFocus
+                    maxLength={32}
+                  />
+                </div>
+
                 <button
-                  type="button"
-                  className="v22-weather-pill"
-                  onClick={() => requestRealGps(true)}
-                  title="Tap to refresh Real GPS"
+                  type="submit"
+                  className="v22-primary-cta-btn v22-onboarding-btn"
+                  disabled={!nameInput.trim()}
                 >
-                  📍 Łódź • {Math.round(weather.temperature || 8)}°C{' '}
-                  {liveSolarPos.elevationDeg <= 0 ? '🌙 Night' : '☀️ Clear'}
+                  Continue
                 </button>
-              </header>
+
+                {userName && (
+                  <button
+                    type="button"
+                    className="v22-btn-light v22-onboarding-cancel"
+                    onClick={() => {
+                      setNameInput(userName);
+                      setIsOnboarding(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </form>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* ==================== SCREEN 1: HOME DASHBOARD (NO MAP) ==================== */}
+            {activeScreen === 1 && (
+              <div className="v22-screen v22-home-screen">
+                <div className="v22-home-top-group">
+                  {/* Minimal Top Bar (Tap Brand 3x to open Hidden Debug Screen) */}
+                  <header className="v22-topbar">
+                    <div
+                      className="v22-brand-row"
+                      onClick={handleBrandHeaderTap}
+                      style={{ cursor: 'pointer' }}
+                      title="LumosWalk (Tap 3x for Street Raycast Debugger)"
+                    >
+                      <span className="v22-brand-dot" />
+                      <span className="v22-brand-title">LumosWalk</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="v22-weather-pill"
+                      onClick={() => requestRealGps(true)}
+                      title="Tap to refresh Real GPS"
+                    >
+                      📍 Łódź • {Math.round(weather.temperature || 8)}°C{' '}
+                      {liveSolarPos.elevationDeg <= 0 ? '🌙 Night' : '☀️ Clear'}
+                    </button>
+                  </header>
+
+                  {/* Personalized User Greeting Header */}
+                  <div className="v22-user-greeting-card">
+                    <div className="v22-greeting-main">
+                      <span className="v22-greeting-period">{greetingWord},</span>
+                      <h1 className="v22-greeting-name">{userName || 'Kiet'}</h1>
+                    </div>
+                    <button
+                      type="button"
+                      className="v22-user-avatar-btn"
+                      onClick={() => {
+                        setNameInput(userName || '');
+                        setIsOnboarding(true);
+                      }}
+                      title="Change your name"
+                    >
+                      <span className="v22-avatar-letter">
+                        {(userName || 'Kiet').trim().charAt(0).toUpperCase()}
+                      </span>
+                    </button>
+                  </div>
 
               {/* DYNAMIC LIVE SESSION BANNER (Shown ONLY when Path or Spot session is active) */}
               {sessionMode !== 'idle' && (
@@ -703,11 +1040,7 @@ export default function App() {
                       key={slot.hour}
                       type="button"
                       className={`v22-hour-slot ${slot.active ? 'active' : ''} ${slot.shaded ? 'shaded' : ''}`}
-                      onClick={() => {
-                        setScrubbedHour(slot.hour);
-                        setViewingSpotArea(null);
-                        setActiveScreen(3);
-                      }}
+                      onClick={() => handleLaunchSunnySpots(slot.hour)}
                     >
                       <div className="v22-slot-time">{slot.label}</div>
                       <div className="v22-slot-sun">{slot.sun}</div>
@@ -725,17 +1058,23 @@ export default function App() {
                   type="button"
                   id="btn-launch-path"
                   className="v22-bento-tile primary"
-                  onClick={() => setActiveScreen(2)}
+                  onClick={handleLaunchSunlightPath}
                 >
                   <div className="v22-tile-top">
                     <div className="v22-tile-icon amber">🧭</div>
                     <span className="v22-tile-badge amber">
-                      {sunnyRoute.isNighttime ? '0% 🌙' : `${sunnyRoute.sunPercent}% ☀️`}
+                      {sessionMode === 'path'
+                        ? `${sessionMinutes}m Active`
+                        : sunnyRoute.isNighttime
+                          ? '0% 🌙'
+                          : `${sunnyRoute.sunPercent}% ☀️`}
                     </span>
                   </div>
                   <div>
                     <div className="v22-tile-title">Sunlight Path</div>
-                    <div className="v22-tile-sub">Sunniest A → B walk</div>
+                    <div className="v22-tile-sub">
+                      {sessionMode === 'path' ? 'Resume walking session' : 'Sunniest A → B walk'}
+                    </div>
                   </div>
                 </button>
 
@@ -744,10 +1083,7 @@ export default function App() {
                   type="button"
                   id="btn-launch-spots"
                   className="v22-bento-tile secondary"
-                  onClick={() => {
-                    setViewingSpotArea(null);
-                    setActiveScreen(3);
-                  }}
+                  onClick={() => handleLaunchSunnySpots()}
                 >
                   <div className="v22-tile-top">
                     <div className="v22-tile-icon soft-amber">🕒</div>
@@ -801,6 +1137,9 @@ export default function App() {
                 >
                   <div className="v22-route-pill-text">
                     {shortStartName} <span className="v22-arrow">→</span> {shortDestName}
+                    <span className="v22-route-time-chip">
+                      {appliedRouteTime.isNow ? 'Now' : `${appliedRouteTime.hour}:00`}
+                    </span>
                   </div>
                   <span className="v22-edit-link">{isEditingRoute ? 'Done' : 'Edit'}</span>
                 </div>
@@ -862,9 +1201,11 @@ export default function App() {
                       aria-label="Select Destination"
                       className="v22-route-select"
                       value={
-                        PRESET_ROUTER_LOCATIONS.some((l) => l.id === destinationLocation?.id)
-                          ? destinationLocation.id
-                          : 'custom'
+                        destinationLocation?.id
+                          ? PRESET_ROUTER_LOCATIONS.some((l) => l.id === destinationLocation.id)
+                            ? destinationLocation.id
+                            : 'custom'
+                          : ''
                       }
                       onChange={(e) => {
                         const found = PRESET_ROUTER_LOCATIONS.find((l) => l.id === e.target.value);
@@ -873,7 +1214,12 @@ export default function App() {
                         }
                       }}
                     >
-                      {!PRESET_ROUTER_LOCATIONS.some((l) => l.id === destinationLocation?.id) && (
+                      {!destinationLocation && (
+                        <option value="" disabled>
+                          -- Choose Destination --
+                        </option>
+                      )}
+                      {!PRESET_ROUTER_LOCATIONS.some((l) => l.id === destinationLocation?.id) && destinationLocation && (
                         <option value="custom">
                           {destinationLocation?.name || 'Pinned Destination'}
                         </option>
@@ -902,14 +1248,63 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Calculate Route Button */}
+                  {/* Sunlight at Specific Time Section */}
+                  <div className="v22-editor-time-section">
+                    <div className="v22-editor-time-header">
+                      <span className="v22-editor-time-title">Sunlight at Specific Time</span>
+                      <div className="v22-scrubber-controls">
+                        <button
+                          type="button"
+                          className={`v22-now-btn ${routeTimeIsNow ? 'active' : ''}`}
+                          onClick={() => {
+                            setRouteTimeIsNow(true);
+                            setRouteTimeHour(Math.min(16, Math.max(8, liveClock.getHours())));
+                          }}
+                          title="Use current real-time sunlight"
+                        >
+                          Now
+                        </button>
+                        <span className="v22-editor-time-badge">
+                          {routeTimeIsNow
+                            ? `Now (${String(liveClock.getHours()).padStart(2, '0')}:${String(liveClock.getMinutes()).padStart(2, '0')})`
+                            : (HOUR_LABELS[routeTimeHour] || `${routeTimeHour}:00`)}
+                        </span>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={8}
+                      max={16}
+                      step={1}
+                      value={routeTimeHour}
+                      onChange={(e) => {
+                        setRouteTimeHour(Number(e.target.value));
+                        setRouteTimeIsNow(false);
+                      }}
+                      className="v22-range-input"
+                    />
+                    <div className="v22-scrubber-ticks">
+                      <span>08:00</span>
+                      <span>12:00 Noon</span>
+                      <span>16:00</span>
+                    </div>
+                  </div>
+
+                  {/* Calculate Route Button with Live Loader State */}
                   <div className="v22-editor-footer-row">
                     <button
                       type="button"
                       className="v22-apply-route-btn"
-                      onClick={() => setIsEditingRoute(false)}
+                      onClick={handleCalculateRoute}
+                      disabled={isCalculatingRoute}
                     >
-                      Calculate Route
+                      {isCalculatingRoute ? (
+                        <span className="v22-btn-loader-text">
+                          <span className="v22-mini-spinner" /> Calculating Path...
+                        </span>
+                      ) : (
+                        'Calculate Route'
+                      )}
                     </button>
                   </div>
                 </div>
@@ -942,6 +1337,7 @@ export default function App() {
                 userLocation={userLocation}
                 onSetUserLocation={handleUpdateUserLocation}
                 gpsRecenterTrigger={gpsRecenterTrigger}
+                lodzCenterNavTrigger={lodzCenterNavTrigger}
                 solarPos={routeSolarPos}
                 routeData={routeData}
                 selectedRouteType={selectedRouteType}
@@ -955,7 +1351,7 @@ export default function App() {
               />
 
               {/* Floating Sunlit Route Highlight Pill */}
-              {!isEditingRoute && (
+              {!isEditingRoute && routeData && (
                 <div
                   className={`v22-map-floating-tag ${
                     sunnyRoute.isNighttime ? 'night' : ''
@@ -989,10 +1385,75 @@ export default function App() {
 
             {/* Bottom Sheet: Pre-Start Route Selection vs. Active Live Path Session */}
             <div className="v22-bottom-sheet">
-              {sessionMode !== 'path' ? (
+              {sessionMode === 'path' ? (
+                <div id="path-active-session">
+                  <div className="v22-active-session-header">
+                    <span className="v22-verified-session-badge">
+                      ● Live Path Session • GPS Verified
+                    </span>
+                    <span className="v22-lux-tag">
+                      {sunnyRoute.isNighttime ? '0 Lux (Night)' : '~12,500 Lux'}
+                    </span>
+                  </div>
+
+                  <div className="v22-active-session-metrics">
+                    <div>
+                      <div className="v22-metric-label">Current Walk Exposure</div>
+                      <div className="v22-metric-big">
+                        +{sessionMinutes} mins{' '}
+                        <span className="v22-counting-tag">counting...</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="v22-metric-label">Weekly Bank</div>
+                      <div className="v22-metric-bank">
+                        {formatHoursMins(totalWeeklyMinutes)}{' '}
+                        {totalWeeklyMinutes >= 180 ? '🎉' : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="v22-sheet-actions-row">
+                    <button
+                      type="button"
+                      className="v22-btn-light"
+                      onClick={() => setActiveScreen(1)}
+                    >
+                      Minimize to Home
+                    </button>
+                    <button
+                      type="button"
+                      className="v22-btn-boost"
+                      onClick={() => handleBoostSessionMinutes(15)}
+                      title="Simulate +15 mins of sunlight exposure"
+                    >
+                      +15m Demo
+                    </button>
+                    <button
+                      type="button"
+                      className="v22-btn-dark"
+                      onClick={() => startSession('idle')}
+                    >
+                      Finish Walk
+                    </button>
+                  </div>
+                </div>
+              ) : isCalculatingRoute ? (
+                <div className="v22-route-loader-sheet">
+                  <div className="v22-route-spinner-wrap">
+                    <div className="v22-route-calc-spinner" />
+                  </div>
+                  <div className="v22-route-loader-title">Calculating Warmest Route...</div>
+                  <div className="v22-route-loader-sub">
+                    Analyzing solar shadows along sidewalks in Łódź
+                  </div>
+                </div>
+              ) : routeData ? (
                 <div id="path-prestart">
                   <div className="v22-sheet-heading-row">
-                    <span className="v22-sheet-heading">Compare Routes (Max +20% Detour)</span>
+                    <span className="v22-sheet-heading">
+                      Compare Routes ({appliedRouteTime.isNow ? 'Now' : `${appliedRouteTime.hour}:00`}) (Max +20% Detour)
+                    </span>
                   </div>
 
                   <div className="v22-route-compare-grid">
@@ -1054,56 +1515,22 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div id="path-active-session">
-                  <div className="v22-active-session-header">
-                    <span className="v22-verified-session-badge">
-                      ● Live Path Session • GPS Verified
-                    </span>
-                    <span className="v22-lux-tag">
-                      {sunnyRoute.isNighttime ? '0 Lux (Night)' : '~12,500 Lux'}
-                    </span>
+                <div className="v22-no-route-prompt">
+                  <div className="v22-no-route-title">Where do you want to walk?</div>
+                  <div className="v22-no-route-sub">
+                    Select a destination to find the sunniest route
                   </div>
-
-                  <div className="v22-active-session-metrics">
-                    <div>
-                      <div className="v22-metric-label">Current Walk Exposure</div>
-                      <div className="v22-metric-big">
-                        +{sessionMinutes} mins{' '}
-                        <span className="v22-counting-tag">counting...</span>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="v22-metric-label">Weekly Bank</div>
-                      <div className="v22-metric-bank">
-                        {formatHoursMins(totalWeeklyMinutes)}{' '}
-                        {totalWeeklyMinutes >= 180 ? '🎉' : ''}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="v22-sheet-actions-row">
-                    <button
-                      type="button"
-                      className="v22-btn-light"
-                      onClick={() => setActiveScreen(1)}
-                    >
-                      Minimize to Home
-                    </button>
-                    <button
-                      type="button"
-                      className="v22-btn-boost"
-                      onClick={() => handleBoostSessionMinutes(15)}
-                      title="Simulate +15 mins of sunlight exposure"
-                    >
-                      +15m Demo
-                    </button>
-                    <button
-                      type="button"
-                      className="v22-btn-dark"
-                      onClick={() => startSession('idle')}
-                    >
-                      Finish Walk
-                    </button>
+                  <div className="v22-quick-dest-row">
+                    {PRESET_ROUTER_LOCATIONS.filter((l) => l.id !== 'current_gps').slice(0, 3).map((loc) => (
+                      <button
+                        key={loc.id}
+                        type="button"
+                        className="v22-quick-dest-btn"
+                        onClick={() => handleSelectQuickDestination(loc)}
+                      >
+                        {loc.name.split(' (')[0]}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1133,9 +1560,19 @@ export default function App() {
               <div className="v22-scrubber-card">
                 <div className="v22-scrubber-top">
                   <span className="v22-scrubber-title">Sunlight at Specific Time</span>
-                  <span className="v22-scrubber-badge">
-                    {HOUR_LABELS[scrubbedHour] || `${scrubbedHour}:00`}
-                  </span>
+                  <div className="v22-scrubber-controls">
+                    <button
+                      type="button"
+                      className={`v22-now-btn ${scrubbedHour === Math.min(16, Math.max(8, liveClock.getHours())) ? 'active' : ''}`}
+                      onClick={() => setScrubbedHour(Math.min(16, Math.max(8, liveClock.getHours())))}
+                      title="Adjust time to current hour"
+                    >
+                      Now
+                    </button>
+                    <span className="v22-scrubber-badge">
+                      {HOUR_LABELS[scrubbedHour] || `${scrubbedHour}:00`}
+                    </span>
+                  </div>
                 </div>
                 <input
                   type="range"
@@ -1163,9 +1600,11 @@ export default function App() {
                 selectedSpot={activeSpotForSession}
                 viewingSpotArea={viewingSpotArea}
                 onSelectSpot={handleSelectSpotArea}
+                onDeselectSpot={handleDeselectSpot}
                 userLocation={userLocation}
                 onSetUserLocation={handleUpdateUserLocation}
                 gpsRecenterTrigger={gpsRecenterTrigger}
+                lodzCenterNavTrigger={lodzCenterNavTrigger}
                 solarPos={scrubbedSolarPos}
                 osmBuildings={osmSpatialData.buildings}
               />
@@ -1402,21 +1841,28 @@ export default function App() {
                 return (
                   <div
                     key={v.id}
-                    className={`v22-voucher-card ${isUnlocked ? 'unlocked' : 'locked'}`}
+                    className={`v22-voucher-card ${isUnlocked ? 'unlocked' : 'locked'} ${
+                      v.partner === 'Żabka' ? 'zabka' : ''
+                    }`}
                   >
                     <div className="v22-voucher-card-top">
                       <div>
-                        <span
-                          className={`v22-voucher-req-badge ${
-                            isUnlocked ? 'unlocked' : minsShort <= 30 ? 'near' : 'locked'
-                          }`}
-                        >
-                          {isUnlocked
-                            ? `✓ Unlocked • Requires ${v.requiredLabel}`
-                            : minsShort <= 30
-                              ? `Requires ${v.requiredLabel} (${minsShort}m more needed)`
-                              : `Requires ${v.requiredLabel} Weekly Goal`}
-                        </span>
+                        <div className="v22-voucher-badge-row">
+                          <span
+                            className={`v22-voucher-req-badge ${
+                              isUnlocked ? 'unlocked' : minsShort <= 30 ? 'near' : 'locked'
+                            }`}
+                          >
+                            {isUnlocked
+                              ? `✓ Unlocked • Requires ${v.requiredLabel}`
+                              : minsShort <= 30
+                                ? `Requires ${v.requiredLabel} (${minsShort}m more needed)`
+                                : `Requires ${v.requiredLabel} Weekly Goal`}
+                          </span>
+                          {v.partner === 'Żabka' && (
+                            <span className="v22-zabka-badge">Żabka</span>
+                          )}
+                        </div>
                         <h3 className="v22-voucher-title">{v.title}</h3>
                         <p className="v22-voucher-venue">{v.venue}</p>
                       </div>
@@ -1425,13 +1871,17 @@ export default function App() {
 
                     {isUnlocked ? (
                       <div className="v22-voucher-redeem-row">
-                        <span className="v22-voucher-code">{v.code}</span>
+                        <span className={`v22-voucher-code ${v.partner === 'Żabka' ? 'zabka' : ''}`}>
+                          {v.code}
+                        </span>
                         <button
                           type="button"
-                          className={`v22-redeem-btn ${isRedeemed ? 'redeemed' : ''}`}
+                          className={`v22-redeem-btn ${isRedeemed ? 'redeemed' : ''} ${
+                            v.partner === 'Żabka' ? 'zabka' : ''
+                          }`}
                           onClick={() => handleRedeemVoucher(v.id)}
                         >
-                          {isRedeemed ? '✓ QR Code Shown' : `Redeem (${v.requiredMinutes / 60}h)`}
+                          {isRedeemed ? '✓ QR Code Shown' : `Redeem (${v.requiredLabel})`}
                         </button>
                       </div>
                     ) : (
@@ -1469,9 +1919,19 @@ export default function App() {
                 >
                   ← Exit Debug
                 </button>
-                <span className="v22-debug-badge-pill">
-                  🛠️ 4 Zones ({totalBldgCount.toLocaleString()} Bldgs • {totalTreeCount.toLocaleString()} Trees)
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className={`v22-now-btn ${showDebug3dMap ? 'active' : ''}`}
+                    onClick={() => setShowDebug3dMap((prev) => !prev)}
+                    title="Toggle 3D Buildings & Trees ON/OFF"
+                  >
+                    3D {showDebug3dMap ? 'ON' : 'OFF'}
+                  </button>
+                  <span className="v22-debug-badge-pill">
+                    🛠️ 4 Zones ({totalBldgCount.toLocaleString()} Bldgs • {totalTreeCount.toLocaleString()} Trees)
+                  </span>
+                </div>
               </div>
 
               {/* Debug Time Mode Switcher (Live Night/Day Clock vs Custom Test Hour) */}
@@ -1558,7 +2018,25 @@ export default function App() {
                 inspectionResult={debugInspectionResult}
                 onInspectPoint={(coords) => setDebugInspectedPoint(coords)}
                 onHoverCoord={(coords) => setDebugHoverCoord(coords)}
+                show3dBuildings={showDebug3dMap}
               />
+            </div>
+
+            {/* Floating 3D Toggle Button for Debug Mode */}
+            <div className="v22-above-sheet-controls">
+              <button
+                type="button"
+                className={`v22-floating-3d-btn ${showDebug3dMap ? 'active' : ''}`}
+                onClick={() => setShowDebug3dMap((prev) => !prev)}
+                title={
+                  showDebug3dMap
+                    ? 'Turn OFF 3D (Switch to Flat 2D View)'
+                    : 'Turn ON 3D (Perspective View with Extruded Buildings & Trees)'
+                }
+                aria-label="Toggle 3D Map in Debug Mode"
+              >
+                <span className="v22-3d-btn-label">3D</span>
+              </button>
             </div>
 
             {/* Bottom Diagnostic Sheet showing exact Street Point Raycast Verdict */}
@@ -1621,6 +2099,8 @@ export default function App() {
               )}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

@@ -73,6 +73,31 @@ button {
   flex-direction: column;
 }
 
+/* Hide native scrollbars across all modern browsers while preserving scrollability */
+.v22-phone-frame,
+.v22-phone-frame *,
+.v22-screen,
+.v22-home-screen,
+.v22-voucher-screen,
+.v22-onboarding-screen,
+.v22-more-spots-list {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE and Edge */
+}
+
+.v22-phone-frame::-webkit-scrollbar,
+.v22-phone-frame *::-webkit-scrollbar,
+.v22-screen::-webkit-scrollbar,
+.v22-home-screen::-webkit-scrollbar,
+.v22-voucher-screen::-webkit-scrollbar,
+.v22-onboarding-screen::-webkit-scrollbar,
+.v22-more-spots-list::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
 /* On actual mobile screens, fill 100% edge-to-edge without outer bezel */
 @media (max-width: 480px) {
   .v22-desktop-stage {
@@ -94,6 +119,333 @@ button {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* =========================================================================
+   SPLASH SCREEN (ON RELOAD / FIRST ENTER)
+   ========================================================================= */
+.v22-splash-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: radial-gradient(circle at 50% 35%, #FFFBEB 0%, #FEF3C7 50%, #FDE68A 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  border-radius: inherit;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: opacity, transform;
+}
+
+.v22-splash-screen.fade-out {
+  opacity: 0;
+  transform: scale(1.02);
+  pointer-events: none;
+}
+
+.v22-splash-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 320px;
+}
+
+.v22-splash-sun-wrap {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v22-splash-sun-glow {
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.4) 0%, rgba(245, 158, 11, 0) 70%);
+  animation: v22-pulse-glow 2s infinite ease-in-out;
+}
+
+.v22-splash-sun-icon {
+  font-size: 3.4rem;
+  filter: drop-shadow(0 8px 18px rgba(217, 119, 6, 0.45));
+  animation: v22-sun-float 2.4s infinite ease-in-out;
+}
+
+.v22-splash-text-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.v22-splash-brand-title {
+  font-family: var(--font-heading);
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0F172A;
+  margin: 0;
+}
+
+.v22-splash-brand-sub {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #78350F;
+  margin: 0;
+}
+
+.v22-splash-brand-city {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #92400E;
+  background: rgba(254, 243, 199, 0.9);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 3px 10px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.v22-splash-footer {
+  margin-top: 14px;
+}
+
+.v22-splash-spinner-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v22-splash-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber-500);
+  animation: v22-bounce-dot 1.2s infinite ease-in-out both;
+}
+
+.v22-splash-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.v22-splash-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes v22-pulse-glow {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+
+@keyframes v22-sun-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes v22-bounce-dot {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* =========================================================================
+   ONBOARDING: USER NAME ENTRY SCREEN
+   ========================================================================= */
+.v22-onboarding-screen {
+  justify-content: center;
+  align-items: center;
+  padding: 24px 20px;
+  background: radial-gradient(circle at 50% 15%, #FEF3C7 0%, #FAFAF7 65%);
+  overflow-y: auto;
+}
+
+.v22-onboarding-inner {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.v22-onboarding-hero {
+  text-align: center;
+}
+
+.v22-onboarding-sun-wrap {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--amber-100);
+  border: 2px solid var(--amber-300);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px auto;
+  font-size: 2rem;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.22);
+}
+
+.v22-onboarding-headline {
+  font-family: var(--font-heading);
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-slate-900);
+  margin-bottom: 6px;
+}
+
+.v22-onboarding-description {
+  font-size: 0.82rem;
+  color: var(--text-slate-600);
+  line-height: 1.45;
+}
+
+.v22-onboarding-card {
+  background: #FFFFFF;
+  border-radius: 22px;
+  border: 1px solid #E2E8F0;
+  padding: 20px 18px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.v22-onboarding-field-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-slate-800);
+  text-align: left;
+}
+
+.v22-onboarding-input-wrap {
+  width: 100%;
+}
+
+.v22-onboarding-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1.5px solid #CBD5E1;
+  background: #F8FAFC;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-slate-900);
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.v22-onboarding-input:focus {
+  border-color: var(--amber-500);
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+}
+
+.v22-onboarding-btn {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  border-radius: 14px;
+  margin-top: 4px;
+}
+
+.v22-onboarding-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.v22-onboarding-cancel {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 0.78rem;
+}
+
+/* =========================================================================
+   USER GREETING HEADER ON HOME DASHBOARD
+   ========================================================================= */
+.v22-user-greeting-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  padding: 2px 0;
+}
+
+.v22-greeting-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.v22-greeting-period {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--amber-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.v22-greeting-name {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-slate-900);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.v22-user-avatar-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--amber-400), var(--amber-500));
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.v22-user-avatar-btn:hover {
+  transform: scale(1.06);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.42);
+}
+
+.v22-avatar-letter {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #FFFFFF;
+  line-height: 1;
 }
 
 /* =========================================================================
@@ -1012,6 +1364,123 @@ button {
   background: var(--amber-600);
 }
 
+/* Route Calculating Loader & Empty Destination Prompt States */
+.v22-btn-loader-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.v22-mini-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: v22-spin 0.75s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.v22-route-loader-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 12px;
+  text-align: center;
+}
+
+.v22-route-spinner-wrap {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v22-route-calc-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgba(245, 158, 11, 0.2);
+  border-top-color: var(--amber-500);
+  border-radius: 50%;
+  animation: v22-spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.v22-route-loader-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-slate-900);
+  margin-bottom: 3px;
+}
+
+.v22-route-loader-sub {
+  font-size: 0.72rem;
+  color: var(--text-slate-500);
+  max-width: 280px;
+  line-height: 1.35;
+}
+
+.v22-no-route-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.v22-no-route-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-slate-900);
+  margin-bottom: 3px;
+}
+
+.v22-no-route-sub {
+  font-size: 0.72rem;
+  color: var(--text-slate-500);
+  margin-bottom: 12px;
+}
+
+.v22-quick-dest-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.v22-quick-dest-btn {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  color: var(--text-slate-700);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v22-quick-dest-btn:hover {
+  background: var(--amber-50);
+  border-color: var(--amber-300);
+  color: var(--amber-800);
+}
+
+@keyframes v22-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Active Session Inside Bottom Sheet */
 .v22-active-session-header {
   display: flex;
@@ -1373,12 +1842,36 @@ button {
   gap: 8px;
 }
 
+.v22-voucher-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .v22-voucher-req-badge {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 6px;
   font-size: 0.69rem;
   font-weight: 700;
+}
+
+.v22-zabka-badge {
+  display: inline-flex;
+  align-items: center;
+  background: #006A38;
+  color: #FFFFFF;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.v22-voucher-card.zabka.unlocked {
+  border: 2px solid #34D399;
+  background: #FAFCF9;
 }
 
 .v22-voucher-req-badge.unlocked {
@@ -1433,6 +1926,12 @@ button {
   border: 1px solid var(--emerald-200);
 }
 
+.v22-voucher-code.zabka {
+  color: #006A38;
+  background: #E8F5E9;
+  border: 1px solid #A5D6A7;
+}
+
 .v22-redeem-btn {
   padding: 6px 12px;
   border-radius: 12px;
@@ -1441,6 +1940,15 @@ button {
   border: none;
   font-size: 0.73rem;
   font-weight: 700;
+  transition: background 0.15s ease;
+}
+
+.v22-redeem-btn.zabka {
+  background: #006A38;
+}
+
+.v22-redeem-btn.zabka:hover {
+  background: #00542C;
 }
 
 .v22-redeem-btn.redeemed {
@@ -2341,9 +2849,18 @@ button {
   line-height: 1;
 }
 
-/* ==================== SCREEN 3 COMPACT CIRCULAR SPOT PINS (NO TEXT OVERLAP) ==================== */
-.v22-compact-spot-pin {
+/* ==================== SCREEN 3 COMPACT CIRCULAR SPOT PINS (NO DRAGGING LAG) ==================== */
+.v22-spot-marker-anchor {
   position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: auto;
+}
+
+.v22-compact-spot-pin {
+  position: absolute;
+  top: -17px;
+  left: -17px;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -2351,12 +2868,13 @@ button {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  /* Strictly NO transition on transform to prevent dragging drift/lag */
+  transition: box-shadow 0.15s ease, background-color 0.15s ease;
   user-select: none;
 }
 
 .v22-compact-spot-pin:hover {
-  transform: scale(1.16);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3), 0 6px 16px rgba(15, 23, 42, 0.28);
   z-index: 25;
 }
 
@@ -2374,6 +2892,8 @@ button {
 }
 
 .v22-compact-spot-pin.nearest {
+  top: -19px;
+  left: -19px;
   width: 38px;
   height: 38px;
   border: 2.5px solid #2563EB;
@@ -2397,4 +2917,80 @@ button {
   font-size: 0.56rem;
   font-weight: 800;
   border: 1.5px solid #FFFFFF;
+}
+
+/* Scrubber Top Controls & "Now" Button */
+.v22-scrubber-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v22-now-btn {
+  padding: 2px 9px;
+  border-radius: 9999px;
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v22-now-btn:hover {
+  background: var(--amber-100);
+  border-color: var(--amber-400);
+  color: var(--amber-900);
+}
+
+.v22-now-btn.active {
+  background: var(--amber-500);
+  border-color: var(--amber-600);
+  color: #FFFFFF;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
+}
+
+/* Route Editor Time Slider Section in Screen 2 */
+.v22-editor-time-section {
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
+
+.v22-editor-time-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.v22-editor-time-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-slate-700);
+}
+
+.v22-editor-time-badge {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--amber-100);
+  color: var(--amber-800);
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.v22-route-time-chip {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #B45309;
+  font-size: 0.65rem;
+  font-weight: 700;
 }

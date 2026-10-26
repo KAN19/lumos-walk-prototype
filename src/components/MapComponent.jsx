@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import { LODZ_CENTER } from '../data/sunnySpotsLodz';
-import { getDistanceMeters, spotsToGeoJson } from '../utils/geoUtils';
+import { getDistanceMeters, spotsToGeoJson, getPolygonAreaM2 } from '../utils/geoUtils';
 import {
   VERIFIED_REAL_OSM_BUILDINGS,
   VERIFIED_REAL_OSM_SIDEWALKS,
@@ -17,9 +17,11 @@ export default function MapComponent({
   selectedSpot = null,
   viewingSpotArea = null, // Step 2 of Sunny Spots: null = Neighborhood Overview, spot = Whole-Area Footprint
   onSelectSpot,
+  onDeselectSpot,
   userLocation,
   onSetUserLocation,
   gpsRecenterTrigger = 0,
+  lodzCenterNavTrigger = 0,
   debugFocusCoord = null,
   solarPos,
   routeData,
@@ -49,9 +51,12 @@ export default function MapComponent({
   const activeModeRef = useRef(activeMode);
   const onInspectPointRef = useRef(onInspectPoint);
   const onHoverCoordRef = useRef(onHoverCoord);
+  const onDeselectSpotRef = useRef(onDeselectSpot);
 
   // Track when the MapLibre style & canvas are ready so layers ALWAYS render
   const [isMapReady, setIsMapReady] = useState(false);
+  // Track current map zoom for zoom-dependent spot level of detail (LOD) filtering
+  const [mapZoom, setMapZoom] = useState(14.6);
 
   useEffect(() => {
     isPickingMapPointRef.current = isPickingMapPoint;
@@ -73,6 +78,10 @@ export default function MapComponent({
   useEffect(() => {
     onHoverCoordRef.current = onHoverCoord;
   }, [onHoverCoord]);
+
+  useEffect(() => {
+    onDeselectSpotRef.current = onDeselectSpot;
+  }, [onDeselectSpot]);
 
   // Build GeoJSON for 3D OSM Buildings + 3D OSM Tree Crowns
   const getOsm3dObjectsGeoJson = useCallback(() => {
@@ -146,9 +155,9 @@ export default function MapComponent({
     };
   }, [activeMode, viewingSpotArea, userLocation]);
 
-  // Incoming solar ray vector towards the selected spot in Spots mode
+  // Incoming solar ray vector towards the selected spot in Spots mode (ONLY active in Step 2: Whole-Area View)
   const getSunBeamGeoJson = useCallback(() => {
-    const targetSpot = viewingSpotArea || selectedSpot;
+    const targetSpot = viewingSpotArea;
     if (
       !targetSpot ||
       !targetSpot.coordinates ||
@@ -182,14 +191,14 @@ export default function MapComponent({
         }
       ]
     };
-  }, [viewingSpotArea, selectedSpot, solarPos, activeMode]);
+  }, [viewingSpotArea, solarPos, activeMode]);
 
   // Sync 3D Buildings, 3D Trees, Ground Shadows, and Debug Raycast layers
   const sync3dAndDebugLayers = useCallback((map) => {
     if (!map) return;
 
     const isDebugView = activeMode === 'debug';
-    const shouldShow3d = isDebugView || (activeMode === 'router' && show3dBuildings);
+    const shouldShow3d = Boolean(show3dBuildings);
 
     const focusPointForShadows = isDebugView
       ? inspectionResult?.point || [19.4574, 51.7678]
@@ -356,17 +365,16 @@ export default function MapComponent({
   const syncAreaLayers = useCallback((map) => {
     if (!map) return;
 
-    const targetSpot = viewingSpotArea || selectedSpot;
+    // Only render the sunlit area polygon when a spot is actively being viewed in Step 2!
+    const targetSpot = viewingSpotArea;
     const spotsToRender =
-      activeMode === 'spots'
-        ? viewingSpotArea
-          ? [viewingSpotArea]
-          : spots
+      activeMode === 'spots' && viewingSpotArea
+        ? [viewingSpotArea]
         : [];
 
     const geoJsonData =
-      spotsToRender.length > 0
-        ? spotsToGeoJson(spotsToRender, windowsBySpotId, targetSpot?.id)
+      spotsToRender.length > 0 && targetSpot
+        ? spotsToGeoJson(spotsToRender, windowsBySpotId, targetSpot.id)
         : { type: 'FeatureCollection', features: [] };
 
     const isTargetSunny =
@@ -588,8 +596,8 @@ export default function MapComponent({
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-      center: userLocation || [LODZ_CENTER.lng, LODZ_CENTER.lat],
-      zoom: activeMode === 'debug' ? 16.2 : 14.6,
+      center: [LODZ_CENTER.lng, LODZ_CENTER.lat],
+      zoom: activeMode === 'debug' ? 16.2 : 14.3,
       pitch: activeMode === 'debug' ? 45 : 0,
       bearing: 0,
       attributionControl: false
@@ -597,6 +605,19 @@ export default function MapComponent({
 
     map.on('load', () => {
       setIsMapReady(true);
+      setMapZoom(map.getZoom());
+      if (activeMode !== 'debug') {
+        map.jumpTo({
+          center: [LODZ_CENTER.lng, LODZ_CENTER.lat],
+          zoom: 14.3,
+          pitch: 0,
+          bearing: 0
+        });
+      }
+    });
+
+    map.on('zoom', () => {
+      setMapZoom(map.getZoom());
     });
 
     map.on('mousemove', (e) => {
@@ -613,6 +634,10 @@ export default function MapComponent({
       }
       if (activeModeRef.current === 'debug' && onInspectPointRef.current) {
         onInspectPointRef.current(coords);
+        return;
+      }
+      if (activeModeRef.current === 'spots' && onDeselectSpotRef.current) {
+        onDeselectSpotRef.current();
       }
     });
 
@@ -788,7 +813,10 @@ export default function MapComponent({
   }, [isMapReady, activeMode, userLocation, onSetUserLocation]);
 
   // Spot Markers in Screen 3:
-  // - In Step 1 (Neighborhood Overview, viewingSpotArea === null): Show compact icon pins ONLY (no cluttered text banners!)
+  // - In Step 1 (Neighborhood Overview, viewingSpotArea === null): Show compact icon pins with Zoom-based LOD filtering
+  //   * Zoom < 12.0: all spots disappear
+  //   * 12.0 <= Zoom < 13.8: small area spots disappear, major spots stay
+  //   * Zoom >= 13.8: all spots are visible
   // - In Step 2 (Zoomed Whole-Area View, viewingSpotArea !== null): Show the Whole Sunlit Area Footprint badge over the polygon
   useEffect(() => {
     const map = mapRef.current;
@@ -803,6 +831,23 @@ export default function MapComponent({
       // Step 2: Whole-Area Sunlit Footprint Overlay Badge on the zoomed polygon
       const win = windowsBySpotId[viewingSpotArea.id];
       const isSunny = win?.status === 'sunny';
+
+      // When zoomed out (mapZoom < 15.6), hide the bulky information badge so the user can see the map clearly!
+      if (mapZoom < 15.6) {
+        const anchorEl = document.createElement('div');
+        anchorEl.className = 'v22-spot-marker-anchor';
+        const el = document.createElement('div');
+        el.className = `v22-compact-spot-pin ${isSunny ? 'sunny' : 'shaded'}`;
+        el.title = `${viewingSpotArea.name.split(' (')[0]}`;
+        el.innerHTML = `<span class="v22-compact-pin-icon">${isSunny ? '☀️' : '☁️'}</span>`;
+        anchorEl.appendChild(el);
+        const marker = new maplibregl.Marker({ element: anchorEl })
+          .setLngLat(viewingSpotArea.coordinates)
+          .addTo(map);
+        markersRef.current[viewingSpotArea.id] = marker;
+        return;
+      }
+
       const el = document.createElement('div');
       el.className = `v22-whole-area-badge ${isSunny ? 'sunny' : 'shaded'}`;
       el.innerHTML = `
@@ -822,12 +867,34 @@ export default function MapComponent({
       return;
     }
 
-    // Step 1: Neighborhood Overview — clean compact circular pins (details hidden until user taps a pin)
-    spots.forEach((spot, index) => {
+    // Step 1: Neighborhood Overview — Filter spots based on map zoom:
+    // - Zoom < 12.0: all spots disappear
+    // - 12.0 <= Zoom < 13.8: spots with least area (< 1200 m²) disappear, major spots stay
+    // - Zoom >= 13.8: all spots are visible
+    let spotsToRender = [];
+    if (mapZoom >= 13.8) {
+      spotsToRender = spots;
+    } else if (mapZoom >= 12.0) {
+      spotsToRender = spots.filter((spot) => {
+        const area =
+          spot.sunlitAreaM2 ||
+          spot.areaM2 ||
+          (spot.polygon ? getPolygonAreaM2(spot.polygon) : 0);
+        return area >= 1200;
+      });
+    } else {
+      spotsToRender = [];
+    }
+
+    spotsToRender.forEach((spot, index) => {
       const win = windowsBySpotId[spot.id];
       const isSunny = win?.status === 'sunny';
       const rank = index + 1;
       const isNearest = rank === 1;
+
+      // Outer wrapper without any CSS transform transitions (prevents drifting during map drag)
+      const anchorEl = document.createElement('div');
+      anchorEl.className = 'v22-spot-marker-anchor';
 
       const el = document.createElement('div');
       el.className = `v22-compact-spot-pin ${isNearest ? 'nearest' : ''} ${isSunny ? 'sunny' : 'shaded'}`;
@@ -842,7 +909,9 @@ export default function MapComponent({
         if (onSelectSpot) onSelectSpot(spot);
       });
 
-      const marker = new maplibregl.Marker({ element: el })
+      anchorEl.appendChild(el);
+
+      const marker = new maplibregl.Marker({ element: anchorEl })
         .setLngLat(spot.coordinates)
         .addTo(map);
 
@@ -855,12 +924,14 @@ export default function MapComponent({
     viewingSpotArea,
     userLocation,
     onSelectSpot,
-    activeMode
+    activeMode,
+    mapZoom
   ]);
 
   // Camera transitions in Screen 3:
   // - When viewingSpotArea is selected: zoom into the Whole Sunlit Area Footprint with 3D pitch
-  // - When returning to Neighborhood Overview (viewingSpotArea === null): frame user's GPS neighborhood
+  // - When returning to Neighborhood Overview (viewingSpotArea === null): DO NOT force fly to GPS location!
+  //   Instead, smoothly reset tilt & bearing to 0 at the current view.
   useEffect(() => {
     if (!mapRef.current || !isMapReady || activeMode !== 'spots') return;
 
@@ -873,21 +944,35 @@ export default function MapComponent({
         offset: [0, -25],
         duration: 650
       });
-    } else if (userLocation) {
-      mapRef.current.flyTo({
-        center: userLocation,
-        zoom: 14.5,
+    } else {
+      // Just ease pitch and bearing back to standard top-down view without moving center away!
+      mapRef.current.easeTo({
         pitch: 0,
         bearing: 0,
-        offset: [0, -20],
-        duration: 550
+        duration: 450
       });
     }
   }, [isMapReady, viewingSpotArea, activeMode]);
 
-  // 2.5D / 3D Camera Tilt Toggle in Screen 2 (Sunlight Path)
+  // Navigate to Central Łódź when entering Sunlight Path or Sunny Spots
   useEffect(() => {
-    if (!mapRef.current || !isMapReady || activeMode !== 'router') return;
+    if (!mapRef.current || !isMapReady) return;
+    if (activeMode === 'router' && routeData) return;
+    if (activeMode === 'spots' && viewingSpotArea) return;
+
+    mapRef.current.flyTo({
+      center: [LODZ_CENTER.lng, LODZ_CENTER.lat],
+      zoom: 14.3,
+      pitch: 0,
+      bearing: 0,
+      duration: 650
+    });
+  }, [lodzCenterNavTrigger, isMapReady, activeMode]);
+
+  // 2.5D / 3D Camera Tilt Toggle in Screen 2 (Sunlight Path) & Screen 5 (Debug Tool)
+  useEffect(() => {
+    if (!mapRef.current || !isMapReady) return;
+    if (activeMode !== 'router' && activeMode !== 'debug') return;
     mapRef.current.easeTo({
       pitch: show3dBuildings ? 46 : 0,
       bearing: show3dBuildings ? -12 : 0,
@@ -913,12 +998,12 @@ export default function MapComponent({
     mapRef.current.flyTo({
       center: debugFocusCoord,
       zoom: 16.3,
-      pitch: 46,
-      bearing: -12,
+      pitch: show3dBuildings ? 46 : 0,
+      bearing: show3dBuildings ? -12 : 0,
       offset: [0, -25],
       duration: 700
     });
-  }, [debugFocusCoord, isMapReady, activeMode]);
+  }, [debugFocusCoord, isMapReady, activeMode, show3dBuildings]);
 
   return (
     <div className="v22-map-wrapper">

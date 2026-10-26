@@ -171,3 +171,25 @@ export function getPolygonCentroid(polygon) {
   return [sumLng / pts.length, sumLat / pts.length];
 }
 
+/**
+ * Approximates ground area in square meters (m²) of a geographic polygon ring using Shoelace projection.
+ * @param {Array<[number, number]>} polygon Array of [lng, lat]
+ * @returns {number} area in square meters
+ */
+export function getPolygonAreaM2(polygon) {
+  if (!polygon || polygon.length < 3) return 0;
+  let area = 0;
+  const latFactor = 111320;
+  const [refLng, refLat] = polygon[0];
+  const lngFactor = 111320 * Math.cos((refLat * Math.PI) / 180);
+
+  for (let i = 0; i < polygon.length - 1; i++) {
+    const x1 = (polygon[i][0] - refLng) * lngFactor;
+    const y1 = (polygon[i][1] - refLat) * latFactor;
+    const x2 = (polygon[i + 1][0] - refLng) * lngFactor;
+    const y2 = (polygon[i + 1][1] - refLat) * latFactor;
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.round(Math.abs(area / 2));
+}
+
