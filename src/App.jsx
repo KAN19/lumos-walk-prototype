@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import MapComponent from './components/MapComponent';
-import { SUNNY_AREAS, DEFAULT_USER_LOCATION } from './data/sunnySpotsLodz';
+import { SUNNY_AREAS, DEFAULT_USER_LOCATION, LODZ_CENTER } from './data/sunnySpotsLodz';
 import { generateSurroundingSpots } from './services/localSunSpotsService';
 import {
   PRESET_ROUTER_LOCATIONS,
@@ -11,6 +11,14 @@ import {
   getCompassSolarPosition,
   calculateSunWindow
 } from './services/solarService';
+import {
+  VERIFIED_REAL_OSM_BUILDINGS,
+  VERIFIED_REAL_OSM_SIDEWALKS,
+  PILOT_ZONES,
+  PILOT_ZONES_STATS,
+  fetchLiveOsmSpatialData,
+  inspectPointSolarShadow
+} from './services/osmShadowService';
 import { fetchLodzWeather, DEFAULT_WEATHER } from './services/weatherService';
 import { getDistanceMeters } from './utils/geoUtils';
 
@@ -23,7 +31,7 @@ const HOUR_LABELS = {
   13: '13:00 (Lunch Peak)',
   14: '14:00 (Afternoon)',
   15: '15:00 (Golden Hour)',
-  16: '16:00 (Late Afternoon)'
+  16: '16:00 (Shaded)'
 };
 
 const WEEKLY_VOUCHERS = [
@@ -63,9 +71,14 @@ function formatHoursMins(totalMins) {
 }
 
 export default function App() {
-  // 4 Core Screens from Wireframe 2.2:
-  // 1 = Home Dashboard (No Map), 2 = Sunlight Path (Map), 3 = Sunny Spots by Time (Map), 4 = Voucher Redemption (No Map)
+  // 4 Core Screens from Wireframe 2.2 + 1 Hidden Debug Screen (Screen 5):
+  // 1 = Home Dashboard (No Map)
+  // 2 = Sunlight Path (Map)
+  // 3 = Sunny Spots by Time (Map: Step 1 Neighborhood Overview -> Step 2 Whole-Area Footprint)
+  // 4 = Voucher Redemption (No Map)
+  // 5 = Hidden Debug Screen (Street Point Raycast & Building/Tree Shadow Inspector)
   const [activeScreen, setActiveScreen] = useState(1);
+  const [brandTapCount, setBrandTapCount] = useState(0);
 
   // Mutually Exclusive Active Session State: 'idle' | 'path' | 'spot'
   const [sessionMode, setSessionMode] = useState('idle');
@@ -75,17 +88,37 @@ export default function App() {
   const [bankedMinutes, setBankedMinutes] = useState(165);
   const [redeemedVoucherIds, setRedeemedVoucherIds] = useState([]);
 
-  // Weather & Location State
+  // Live Clock & Weather State
+  const [liveClock, setLiveClock] = useState(() => new Date());
   const [weather, setWeather] = useState(DEFAULT_WEATHER);
+
+  // Real GPS State & User Location
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION);
+  const [gpsState, setGpsState] = useState({
+    status: 'idle', // 'locating' | 'active' | 'fallback'
+    hardwareCoords: null,
+    accuracyMeters: null,
+    isInsideLodz: false
+  });
+  const [gpsToastMessage, setGpsToastMessage] = useState(null);
+  const [gpsRecenterTrigger, setGpsRecenterTrigger] = useState(0);
 
-  // Screen 3 Time Scrubber State (8 to 16 hour, defaults to 13:00 Lunch Peak)
+  // Live OSM 3D Buildings, Trees & Sidewalks (for Raycasting & Debug Screen)
+  const [osmSpatialData, setOsmSpatialData] = useState({
+    buildings: VERIFIED_REAL_OSM_BUILDINGS,
+    sidewalks: VERIFIED_REAL_OSM_SIDEWALKS,
+    source: 'verified-cache'
+  });
+
+  // Screen 3 (Sunny Spots by Time) State
   const [scrubbedHour, setScrubbedHour] = useState(13);
+  const [viewingSpotArea, setViewingSpotArea] = useState(null); // null = Neighborhood Overview, spot = Whole-Area View
+  const [isSpotsDrawerExpanded, setIsSpotsDrawerExpanded] = useState(false);
 
-  // Screen 2 Route Planner State
+  // Screen 2 (Sunlight Path) State
   const [startLocation, setStartLocation] = useState({
     id: 'current_gps',
-    name: '📍 GPS',
+    name: 'My Current Location',
     coordinates: DEFAULT_USER_LOCATION
   });
   const [destinationLocation, setDestinationLocation] = useState(
@@ -95,14 +128,149 @@ export default function App() {
   const [selectedRouteType, setSelectedRouteType] = useState('sunny');
   const [isEditingRoute, setIsEditingRoute] = useState(false);
   const [isPickingMapPoint, setIsPickingMapPoint] = useState(null);
+  const [showRouter3dMap, setShowRouter3dMap] = useState(false); // ON/OFF toggle for 2.5D/3D buildings & trees on Sunlight Path
+  // Optional time override in Route Editor if user wants to preview daytime routes at night
+  const [routeTimeMode, setRouteTimeMode] = useState('live'); // 'live' | 'daytime_preview'
+  const [routePreviewHour, setRoutePreviewHour] = useState(13);
 
-  // Fetch Łódź live weather on mount
+  // Screen 5 (Hidden Debug Street Raycast Tool) State
+  const [debugTimeMode, setDebugTimeMode] = useState('live'); // 'live' | 'custom'
+  const [debugCustomHour, setDebugCustomHour] = useState(13);
+  const [debugHoverCoord, setDebugHoverCoord] = useState(DEFAULT_USER_LOCATION);
+  const [debugInspectedPoint, setDebugInspectedPoint] = useState([19.4574, 51.7678]);
+  const [activePilotZoneId, setActivePilotZoneId] = useState('zone-1-piotrkowska');
+  const [debugFocusCoord, setDebugFocusCoord] = useState(null);
+
+  // Show temporary GPS toast
+  const triggerGpsToast = useCallback((msg) => {
+    setGpsToastMessage(msg);
+    setTimeout(() => {
+      setGpsToastMessage(null);
+    }, 2200);
+  }, []);
+
+  // Real Browser Geolocation Handler (`navigator.geolocation`)
+  const requestRealGps = useCallback((showToast = false) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGpsState((prev) => ({ ...prev, status: 'fallback' }));
+      if (showToast) {
+        setGpsRecenterTrigger((n) => n + 1);
+        triggerGpsToast('📍 Centered on your GPS area');
+      }
+      return;
+    }
+
+    setGpsState((prev) => ({ ...prev, status: 'locating' }));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const hwCoords = [pos.coords.longitude, pos.coords.latitude];
+        const distFromLodz = getDistanceMeters(hwCoords, [LODZ_CENTER.lng, LODZ_CENTER.lat]);
+        const isInsideLodz = distFromLodz < 25000; // within 25km of Łódź
+
+        setGpsState({
+          status: 'active',
+          hardwareCoords: hwCoords,
+          accuracyMeters: Math.round(pos.coords.accuracy || 12),
+          isInsideLodz
+        });
+
+        // If user is physically in Łódź, use their exact hardware GPS coordinates;
+        // otherwise keep map in Łódź so Łódź streets/spots work seamlessly while recording hardware GPS
+        const activeCoord = isInsideLodz ? hwCoords : DEFAULT_USER_LOCATION;
+        setUserLocation(activeCoord);
+        setStartLocation((prev) =>
+          prev?.id === 'current_gps' ? { ...prev, coordinates: activeCoord } : prev
+        );
+
+        if (showToast) {
+          setGpsRecenterTrigger((n) => n + 1);
+          triggerGpsToast(
+            isInsideLodz
+              ? `📍 Live GPS locked (±${Math.round(pos.coords.accuracy || 10)}m)`
+              : '📍 Centered on your Łódź GPS area'
+          );
+        }
+      },
+      () => {
+        setGpsState((prev) => ({ ...prev, status: 'fallback' }));
+        if (showToast) {
+          setGpsRecenterTrigger((n) => n + 1);
+          triggerGpsToast('📍 Centered on your GPS area');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
+    );
+  }, [triggerGpsToast]);
+
+  // Initialize Real GPS watch + Live Clock + Weather + Live Overpass OSM data (Buildings + Trees + Sidewalks)
   useEffect(() => {
+    requestRealGps(false);
+
+    let watchId = null;
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const hwCoords = [pos.coords.longitude, pos.coords.latitude];
+          const distFromLodz = getDistanceMeters(hwCoords, [LODZ_CENTER.lng, LODZ_CENTER.lat]);
+          const isInsideLodz = distFromLodz < 25000;
+          setGpsState({
+            status: 'active',
+            hardwareCoords: hwCoords,
+            accuracyMeters: Math.round(pos.coords.accuracy || 12),
+            isInsideLodz
+          });
+          if (isInsideLodz) {
+            setUserLocation(hwCoords);
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 20000 }
+      );
+    }
+
+    const clockInterval = setInterval(() => {
+      setLiveClock(new Date());
+    }, 30000);
+
     fetchLodzWeather()
       .then((w) => {
         if (w) setWeather(w);
       })
       .catch(() => {});
+
+    fetchLiveOsmSpatialData(DEFAULT_USER_LOCATION, 400)
+      .then((data) => {
+        if (data && data.buildings) {
+          setOsmSpatialData(data);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      if (watchId !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      clearInterval(clockInterval);
+    };
+  }, [requestRealGps]);
+
+  // Keyboard shortcut Shift + D to toggle Hidden Debug Screen (Screen 5)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        setActiveScreen((prev) => (prev === 5 ? 1 : 5));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Sync startLocation when user drags GPS marker
+  const handleUpdateUserLocation = useCallback((newCoords) => {
+    setUserLocation(newCoords);
+    setStartLocation((prev) =>
+      prev?.id === 'current_gps' ? { ...prev, coordinates: newCoords } : prev
+    );
   }, []);
 
   // Increment live session minutes while a Path or Spot session is active
@@ -110,22 +278,29 @@ export default function App() {
     if (sessionMode === 'idle') return;
     const timer = setInterval(() => {
       setSessionMinutes((prev) => prev + 1);
-    }, 15000); // +1 min every 15s for responsive live demo
+    }, 15000);
     return () => clearInterval(timer);
   }, [sessionMode]);
 
-  // Compute simulated Date for the scrubbed hour in Łódź
-  const simulatedDate = useMemo(() => {
+  // 1. LIVE Real-Time Solar Position in Łódź (Used by Screen 1 & Screen 2 Sunlight Path by default!)
+  const liveSolarPos = useMemo(() => {
+    return getCompassSolarPosition(liveClock, userLocation[1], userLocation[0]);
+  }, [liveClock, userLocation]);
+
+  // Solar Position used on Screen 2 (Sunlight Path):
+  // Always uses the real-time current clock in Łódź (`liveSolarPos`).
+  const routeSolarPos = liveSolarPos;
+
+  // 2. Scrubbed Time Solar Position (Used by Screen 3: "Sunny Spots at Specific Time")
+  const scrubbedDate = useMemo(() => {
     const d = new Date();
     d.setHours(scrubbedHour, 0, 0, 0);
     return d;
   }, [scrubbedHour]);
 
-  // Compute solar position at scrubbed hour (with reliable winter midday floor so demo is always vivid)
-  const solarPos = useMemo(() => {
-    const pos = getCompassSolarPosition(simulatedDate);
-    if (pos.elevationDeg <= 4) {
-      // Map hours 8..16 to a realistic Łódź solar arc if winter night/low sun
+  const scrubbedSolarPos = useMemo(() => {
+    const pos = getCompassSolarPosition(scrubbedDate, userLocation[1], userLocation[0]);
+    if (pos.elevationDeg <= 4 && scrubbedHour >= 8 && scrubbedHour <= 15) {
       const hourOffset = scrubbedHour - 12.5;
       const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
       const syntheticAz = Math.round(185 + hourOffset * 15);
@@ -136,56 +311,101 @@ export default function App() {
       };
     }
     return pos;
-  }, [simulatedDate, scrubbedHour]);
+  }, [scrubbedDate, scrubbedHour, userLocation]);
 
-  // All Sunny Spots in Łódź
-  const allSpots = useMemo(() => {
-    const localBenches = generateSurroundingSpots(userLocation, solarPos);
-    return [...SUNNY_AREAS, ...localBenches];
-  }, [userLocation, solarPos]);
+  // 3. Debug Screen Solar Position (Live Clock vs Custom Debug Hour)
+  const debugSolarPos = useMemo(() => {
+    if (debugTimeMode === 'live') {
+      return liveSolarPos;
+    }
+    const d = new Date();
+    d.setHours(debugCustomHour, 0, 0, 0);
+    const pos = getCompassSolarPosition(d, userLocation[1], userLocation[0]);
+    if (pos.elevationDeg <= 0 && debugCustomHour >= 8 && debugCustomHour <= 16) {
+      const hourOffset = debugCustomHour - 12.5;
+      return {
+        ...pos,
+        elevationDeg: Math.max(5, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10),
+        azimuthDeg: Math.round(185 + hourOffset * 15)
+      };
+    }
+    return pos;
+  }, [debugTimeMode, debugCustomHour, liveSolarPos, userLocation]);
+
+  // Real-Time Raycast Inspection Result for the Hidden Debug Screen (Checks Buildings AND Trees)
+  const debugInspectionResult = useMemo(() => {
+    if (!debugInspectedPoint) return null;
+    return inspectPointSolarShadow(
+      debugInspectedPoint,
+      debugSolarPos,
+      osmSpatialData.buildings,
+      osmSpatialData.sidewalks
+    );
+  }, [debugInspectedPoint, debugSolarPos, osmSpatialData]);
+
+  // All Sunny Spots in Łódź sorted by distance from User's GPS (Nearest First!)
+  const sortedSpots = useMemo(() => {
+    const localBenches = generateSurroundingSpots(userLocation, scrubbedSolarPos);
+    const combined = [...SUNNY_AREAS, ...localBenches];
+    return combined
+      .map((s) => ({
+        ...s,
+        distanceMeters: Math.round(getDistanceMeters(userLocation, s.coordinates))
+      }))
+      .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  }, [userLocation, scrubbedSolarPos]);
 
   const [selectedSpotId, setSelectedSpotId] = useState(SUNNY_AREAS[0]?.id || 'spot-rubinstein');
 
-  const selectedSpot = useMemo(() => {
-    return allSpots.find((s) => s.id === selectedSpotId) || allSpots[0];
-  }, [allSpots, selectedSpotId]);
+  const activeSpotForSession = useMemo(() => {
+    if (viewingSpotArea) return viewingSpotArea;
+    return sortedSpots.find((s) => s.id === selectedSpotId) || sortedSpots[0];
+  }, [viewingSpotArea, sortedSpots, selectedSpotId]);
 
-  // Compute Sun Windows for each spot at the scrubbed hour
+  // Compute Sun Windows for each spot at the scrubbed hour on Screen 3
   const windowsBySpotId = useMemo(() => {
     const map = {};
-    allSpots.forEach((spot) => {
-      const baseWin = calculateSunWindow(spot, simulatedDate);
-      // At hours >= 15, reflect late afternoon shadow onset
-      if (scrubbedHour >= 15) {
+    sortedSpots.forEach((spot) => {
+      const baseWin = calculateSunWindow(spot, scrubbedDate);
+      if (scrubbedHour >= 16) {
         map[spot.id] = {
           status: 'shaded',
           minutesRemaining: 0,
           transitionTime: 'Tomorrow',
-          label: '⚠️ Shaded after 14:40'
+          windowRange: '11:15–14:40',
+          label: '⚠️ Enters building shade after 14:40'
         };
       } else {
-        const minsLeft = Math.max(20, (15 - scrubbedHour) * 60 - 20);
+        const minsLeft = Math.max(20, (15 - scrubbedHour) * 60 + 40);
         map[spot.id] = {
           ...baseWin,
           status: 'sunny',
           minutesRemaining: minsLeft,
+          windowRange: spot.sunWindowLabel || '11:15–14:40',
           label: 'Sunny until 14:40'
         };
       }
     });
     return map;
-  }, [allSpots, simulatedDate, scrubbedHour]);
+  }, [sortedSpots, scrubbedDate, scrubbedHour]);
 
   const sunnySpotsCount = useMemo(() => {
-    return allSpots.filter((s) => windowsBySpotId[s.id]?.status === 'sunny').length;
-  }, [allSpots, windowsBySpotId]);
+    return sortedSpots.filter((s) => windowsBySpotId[s.id]?.status === 'sunny').length;
+  }, [sortedSpots, windowsBySpotId]);
 
-  // Calculate dual walking routes (Sunniest vs Shortest)
+  // Calculate dual walking routes (Sunniest vs Shortest) using 3D Building + Tree Raycasting
+  // & <= +20% maximum detour constraint
   useEffect(() => {
     if (!startLocation?.coordinates || !destinationLocation?.coordinates) return;
     let isCurrent = true;
 
-    calculateDualRoutes(startLocation.coordinates, destinationLocation.coordinates, solarPos)
+    calculateDualRoutes(
+      startLocation.coordinates,
+      destinationLocation.coordinates,
+      routeSolarPos,
+      osmSpatialData.buildings,
+      osmSpatialData.sidewalks
+    )
       .then((data) => {
         if (isCurrent && data) {
           setRouteData(data);
@@ -196,12 +416,22 @@ export default function App() {
     return () => {
       isCurrent = false;
     };
-  }, [startLocation, destinationLocation, solarPos.azimuthDeg, solarPos.elevationDeg]);
+  }, [
+    startLocation,
+    destinationLocation,
+    routeSolarPos.azimuthDeg,
+    routeSolarPos.elevationDeg,
+    osmSpatialData.buildings,
+    osmSpatialData.sidewalks
+  ]);
 
   // Total accumulated weekly minutes (base banked + active live session)
   const totalWeeklyMinutes = bankedMinutes + (sessionMode !== 'idle' ? sessionMinutes : 0);
   const weeklyGoalMinutes = 180; // 3h 00m weekly reference goal
-  const weeklyProgressPercent = Math.min(100, Math.round((totalWeeklyMinutes / weeklyGoalMinutes) * 100));
+  const weeklyProgressPercent = Math.min(
+    100,
+    Math.round((totalWeeklyMinutes / weeklyGoalMinutes) * 100)
+  );
   const minsRemainingTo3h = Math.max(0, weeklyGoalMinutes - totalWeeklyMinutes);
 
   const unlockedVouchersCount = WEEKLY_VOUCHERS.filter(
@@ -219,14 +449,13 @@ export default function App() {
       return;
     }
 
-    // Starting 'path' cancels 'spot' and vice versa; bank any previous session minutes first
     if (sessionMode !== 'idle' && sessionMode !== mode && sessionMinutes > 0) {
       setBankedMinutes((prev) => prev + sessionMinutes);
     }
 
     const initialMins =
       mode === 'path'
-        ? routeData?.sunnyRoute?.sunMinutes || 18
+        ? Math.max(0, routeData?.sunnyRoute?.sunMinutes ?? 0)
         : 12;
 
     setSessionMode(mode);
@@ -264,47 +493,107 @@ export default function App() {
     setIsEditingRoute(false);
   };
 
-  const sunnyRoute = routeData?.sunnyRoute || {
-    sunPercent: 78,
-    walkMinutes: 22,
-    totalDistanceMeters: 1400,
-    sunMinutes: 18
+  // Step 1 -> Step 2 on Screen 3 (Sunny Spots): Click a spot to zoom into its Whole Sunlit Area Footprint
+  const handleSelectSpotArea = (spot) => {
+    setSelectedSpotId(spot.id);
+    setViewingSpotArea(spot);
   };
-  const shortestRoute = routeData?.shortestRoute || {
-    sunPercent: 44,
+
+  const handleBackToNearbySpotsList = () => {
+    setViewingSpotArea(null);
+  };
+
+  const handleLocateUserOnSpotsMap = () => {
+    setViewingSpotArea(null);
+    requestRealGps(true);
+  };
+
+  // Hidden Debug Screen trigger: tap brand header 3 times
+  const handleBrandHeaderTap = () => {
+    setBrandTapCount((prev) => {
+      const next = prev + 1;
+      if (next >= 3) {
+        setActiveScreen(5);
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  const sunnyRoute = routeData?.sunnyRoute || {
+    sunPercent: liveSolarPos.elevationDeg <= 0 ? 0 : 78,
     walkMinutes: 18,
     totalDistanceMeters: 1200,
-    sunMinutes: 8
+    sunMinutes: liveSolarPos.elevationDeg <= 0 ? 0 : 14,
+    isNighttime: liveSolarPos.elevationDeg <= 0,
+    isSameAsShortest: liveSolarPos.elevationDeg <= 0
+  };
+  const shortestRoute = routeData?.shortestRoute || {
+    sunPercent: liveSolarPos.elevationDeg <= 0 ? 0 : 44,
+    walkMinutes: 18,
+    totalDistanceMeters: 1200,
+    sunMinutes: liveSolarPos.elevationDeg <= 0 ? 0 : 8,
+    isNighttime: liveSolarPos.elevationDeg <= 0
   };
   const activeRoute = selectedRouteType === 'shortest' ? shortestRoute : sunnyRoute;
+  const routeDetourPercent = routeData?.comparison?.detourPercent || 0;
 
-  const shortStartName = startLocation?.id === 'current_gps'
-    ? 'GPS'
-    : startLocation?.name?.split(' (')[0] || 'Start';
+  const shortStartName =
+    startLocation?.id === 'current_gps'
+      ? 'GPS'
+      : startLocation?.name?.split(' (')[0] || 'Start';
   const shortDestName = destinationLocation?.name?.split(' (')[0] || 'Manufaktura';
 
-  const selectedSpotDistance = selectedSpot
-    ? getDistanceMeters(userLocation, selectedSpot.coordinates)
-    : 180;
-  const isSelectedSpotSunny = windowsBySpotId[selectedSpot?.id]?.status === 'sunny';
+  const nearestSpot = sortedSpots[0];
+  const moreNearbySpots = sortedSpots.slice(1, 7);
+  const viewingSpotDistance = viewingSpotArea
+    ? Math.round(getDistanceMeters(userLocation, viewingSpotArea.coordinates))
+    : nearestSpot?.distanceMeters || 180;
+  const isViewingSpotSunny = viewingSpotArea
+    ? windowsBySpotId[viewingSpotArea.id]?.status === 'sunny'
+    : true;
+
+  const totalTreeCount = osmSpatialData.buildings.filter((b) => b.type === 'tree').length;
+  const totalBldgCount = osmSpatialData.buildings.filter((b) => b.type !== 'tree').length;
 
   return (
     <div className="v22-desktop-stage">
+      {/* Subtle Hidden Debug Tool Trigger outside the mobile frame (or tap Brand Dot 3x / Shift+D) */}
+      <button
+        type="button"
+        className="v22-hidden-debug-trigger"
+        onClick={() => setActiveScreen((prev) => (prev === 5 ? 1 : 5))}
+        title="Open Hidden Street Raycast Debug Tool (Shift+D)"
+      >
+        🛠️ {activeScreen === 5 ? 'Exit Debug' : 'Debug Raycast'}
+      </button>
+
       {/* Centered Mobile Viewport Frame */}
       <div className="v22-phone-frame">
         {/* ==================== SCREEN 1: HOME DASHBOARD (NO MAP) ==================== */}
         {activeScreen === 1 && (
           <div className="v22-screen v22-home-screen">
             <div className="v22-home-top-group">
-              {/* Minimal Top Bar */}
+              {/* Minimal Top Bar (Tap Brand 3x to open Hidden Debug Screen) */}
               <header className="v22-topbar">
-                <div className="v22-brand-row">
+                <div
+                  className="v22-brand-row"
+                  onClick={handleBrandHeaderTap}
+                  style={{ cursor: 'pointer' }}
+                  title="LumosWalk (Tap 3x for Street Raycast Debugger)"
+                >
                   <span className="v22-brand-dot" />
                   <span className="v22-brand-title">LumosWalk</span>
                 </div>
-                <span className="v22-weather-pill">
-                  📍 Łódź • {Math.round(weather.temperature || 8)}°C Clear
-                </span>
+                <button
+                  type="button"
+                  className="v22-weather-pill"
+                  onClick={() => requestRealGps(true)}
+                  title="Tap to refresh Real GPS"
+                >
+                  📍 Łódź • {Math.round(weather.temperature || 8)}°C{' '}
+                  {liveSolarPos.elevationDeg <= 0 ? '🌙 Night' : '☀️ Clear'}
+                </button>
               </header>
 
               {/* DYNAMIC LIVE SESSION BANNER (Shown ONLY when Path or Spot session is active) */}
@@ -314,20 +603,28 @@ export default function App() {
                     <div className="v22-live-status-left">
                       <span className="v22-pulse-dot" />
                       <span className="v22-live-type-label">
-                        {sessionMode === 'path' ? '🧭 Active Sunlight Path' : '🪑 Active Sunny Spot'}
+                        {sessionMode === 'path'
+                          ? 'Active Sunlight Path'
+                          : 'Active Sunny Spot'}
                       </span>
                     </div>
-                    <span className="v22-gps-verified-pill">✓ GPS Verified</span>
+                    <span className="v22-gps-verified-pill">GPS Verified</span>
                   </div>
 
                   <div className="v22-live-banner-mid">
-                    <div>
+                    <div className="v22-live-info-col">
                       <div className="v22-live-session-title">
                         {sessionMode === 'path'
-                          ? `${shortStartName} → ${shortDestName} (${activeRoute.sunPercent}% ☀️)`
-                          : selectedSpot?.name?.split(' (')[0]}
+                          ? `${shortStartName} → ${shortDestName}`
+                          : `${activeSpotForSession?.name?.split(' (')[0] || 'Pasaż Rubinsteina'}`}
                       </div>
-                      <div className="v22-live-session-sub">Accumulating ~12,500 Lux</div>
+                      <div className="v22-live-session-sub">
+                        {liveSolarPos.elevationDeg <= 0 && sessionMode === 'path'
+                          ? 'Nighttime walk in progress'
+                          : sessionMode === 'path'
+                            ? `${sunnyRoute.sunPercent}% direct sunlight`
+                            : 'Sun exposure in progress'}
+                      </div>
                     </div>
                     <div className="v22-live-timer-col">
                       <div className="v22-live-timer-val">+{sessionMinutes}m</div>
@@ -386,10 +683,14 @@ export default function App() {
               <div className="v22-card v22-solar-brief-card">
                 <div className="v22-brief-header">
                   <span className="v22-brief-title">🌤️ Today&apos;s Solar Window</span>
-                  <span className="v22-peak-pill">Peak Sun Now</span>
+                  <span className="v22-peak-pill">
+                    {liveSolarPos.elevationDeg <= 0
+                      ? `🌙 Night (${liveSolarPos.elevationDeg}°)`
+                      : `☀️ Elev ${liveSolarPos.elevationDeg}°`}
+                  </span>
                 </div>
                 <p className="v22-brief-desc">
-                  <strong>Clear sky until 14:45</strong> (~12,500 Lux). Heavy clouds arrive after 15:00.
+                  <strong>Clear sky window 11:00–14:45</strong> (~12,500 Lux). Tap any hour to inspect sunlit areas:
                 </p>
                 <div className="v22-hourly-grid">
                   {[
@@ -404,6 +705,7 @@ export default function App() {
                       className={`v22-hour-slot ${slot.active ? 'active' : ''} ${slot.shaded ? 'shaded' : ''}`}
                       onClick={() => {
                         setScrubbedHour(slot.hour);
+                        setViewingSpotArea(null);
                         setActiveScreen(3);
                       }}
                     >
@@ -415,7 +717,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bento Grid Feature Launchers (No "Open Map" clutter) */}
+            {/* Bento Grid Feature Launchers */}
             <div className="v22-bento-section">
               <div className="v22-bento-grid2">
                 {/* Tile 1: Sunlight Path */}
@@ -427,7 +729,9 @@ export default function App() {
                 >
                   <div className="v22-tile-top">
                     <div className="v22-tile-icon amber">🧭</div>
-                    <span className="v22-tile-badge amber">{sunnyRoute.sunPercent}% ☀️</span>
+                    <span className="v22-tile-badge amber">
+                      {sunnyRoute.isNighttime ? '0% 🌙' : `${sunnyRoute.sunPercent}% ☀️`}
+                    </span>
                   </div>
                   <div>
                     <div className="v22-tile-title">Sunlight Path</div>
@@ -440,15 +744,18 @@ export default function App() {
                   type="button"
                   id="btn-launch-spots"
                   className="v22-bento-tile secondary"
-                  onClick={() => setActiveScreen(3)}
+                  onClick={() => {
+                    setViewingSpotArea(null);
+                    setActiveScreen(3);
+                  }}
                 >
                   <div className="v22-tile-top">
                     <div className="v22-tile-icon soft-amber">🕒</div>
-                    <span className="v22-tile-badge slate">{allSpots.length} Spots</span>
+                    <span className="v22-tile-badge slate">{sortedSpots.length} Spots</span>
                   </div>
                   <div>
                     <div className="v22-tile-title">Sunny Spots</div>
-                    <div className="v22-tile-sub">Scrub any hour</div>
+                    <div className="v22-tile-sub">Near your GPS area</div>
                   </div>
                 </button>
               </div>
@@ -493,20 +800,19 @@ export default function App() {
                   onClick={() => setIsEditingRoute((prev) => !prev)}
                 >
                   <div className="v22-route-pill-text">
-                    📍 {shortStartName} <span className="v22-arrow">→</span> 🏁 {shortDestName}
+                    {shortStartName} <span className="v22-arrow">→</span> {shortDestName}
                   </div>
                   <span className="v22-edit-link">{isEditingRoute ? 'Done' : 'Edit'}</span>
                 </div>
               </div>
 
-              {/* Expandable Departure (A) & Destination (B) Picker when "Edit" is clicked */}
+              {/* Expandable Departure & Destination Picker when "Edit" is clicked */}
               {isEditingRoute && (
                 <div className="v22-route-editor-card">
-                  {/* Departure (A) Row */}
+                  {/* Starting Place Row (Includes "Use my current GPS" as top option) */}
                   <div className="v22-editor-field-row">
-                    <span className="v22-point-pill start">A</span>
                     <select
-                      aria-label="Select Departure"
+                      aria-label="Select Starting Place"
                       className="v22-route-select"
                       value={
                         PRESET_ROUTER_LOCATIONS.some((l) => l.id === startLocation?.id)
@@ -516,11 +822,12 @@ export default function App() {
                       onChange={(e) => {
                         const found = PRESET_ROUTER_LOCATIONS.find((l) => l.id === e.target.value);
                         if (found) {
-                          setStartLocation(
-                            found.id === 'current_gps'
-                              ? { ...found, coordinates: userLocation }
-                              : found
-                          );
+                          if (found.id === 'current_gps') {
+                            requestRealGps(true);
+                            setStartLocation({ ...found, coordinates: userLocation });
+                          } else {
+                            setStartLocation(found);
+                          }
                         }
                       }}
                     >
@@ -535,20 +842,22 @@ export default function App() {
                     </select>
                     <button
                       type="button"
-                      className={`v22-pin-mini-btn ${isPickingMapPoint === 'start' ? 'active' : ''}`}
+                      className={`v22-pin-mini-btn icon-only ${
+                        isPickingMapPoint === 'start' ? 'active' : ''
+                      }`}
                       onClick={() => {
                         setIsPickingMapPoint('start');
                         setIsEditingRoute(false);
                       }}
-                      title="Tap map to set Departure (A)"
+                      title="Pin departure on map"
+                      aria-label="Pin departure on map"
                     >
-                      📌 Pin A
+                      📌
                     </button>
                   </div>
 
-                  {/* Destination (B) Row */}
+                  {/* Destination Row */}
                   <div className="v22-editor-field-row">
-                    <span className="v22-point-pill dest">B</span>
                     <select
                       aria-label="Select Destination"
                       className="v22-route-select"
@@ -560,55 +869,47 @@ export default function App() {
                       onChange={(e) => {
                         const found = PRESET_ROUTER_LOCATIONS.find((l) => l.id === e.target.value);
                         if (found) {
-                          setDestinationLocation(
-                            found.id === 'current_gps'
-                              ? { ...found, coordinates: userLocation }
-                              : found
-                          );
+                          setDestinationLocation(found);
                         }
                       }}
                     >
                       {!PRESET_ROUTER_LOCATIONS.some((l) => l.id === destinationLocation?.id) && (
-                        <option value="custom">{destinationLocation?.name || 'Pinned Destination'}</option>
-                      )}
-                      {PRESET_ROUTER_LOCATIONS.map((loc) => (
-                        <option key={`dest-${loc.id}`} value={loc.id}>
-                          To: {loc.name}
+                        <option value="custom">
+                          {destinationLocation?.name || 'Pinned Destination'}
                         </option>
-                      ))}
+                      )}
+                      {PRESET_ROUTER_LOCATIONS.filter((loc) => loc.id !== 'current_gps').map(
+                        (loc) => (
+                          <option key={`dest-${loc.id}`} value={loc.id}>
+                            To: {loc.name}
+                          </option>
+                        )
+                      )}
                     </select>
                     <button
                       type="button"
-                      className={`v22-pin-mini-btn ${isPickingMapPoint === 'dest' ? 'active' : ''}`}
+                      className={`v22-pin-mini-btn icon-only ${
+                        isPickingMapPoint === 'dest' ? 'active' : ''
+                      }`}
                       onClick={() => {
                         setIsPickingMapPoint('dest');
                         setIsEditingRoute(false);
                       }}
-                      title="Tap map to set Destination (B)"
+                      title="Pin destination on map"
+                      aria-label="Pin destination on map"
                     >
-                      📌 Pin B
+                      📌
                     </button>
                   </div>
 
-                  {/* Quick Actions Row: Swap A ⇅ B & Close */}
+                  {/* Calculate Route Button */}
                   <div className="v22-editor-footer-row">
-                    <button
-                      type="button"
-                      className="v22-swap-route-btn"
-                      onClick={() => {
-                        const prevStart = startLocation;
-                        setStartLocation(destinationLocation);
-                        setDestinationLocation(prevStart);
-                      }}
-                    >
-                      ⇅ Swap A &amp; B
-                    </button>
                     <button
                       type="button"
                       className="v22-apply-route-btn"
                       onClick={() => setIsEditingRoute(false)}
                     >
-                      Calculate Route ✓
+                      Calculate Route
                     </button>
                   </div>
                 </div>
@@ -618,8 +919,10 @@ export default function App() {
               {isPickingMapPoint && (
                 <div className="v22-map-pin-banner">
                   <span>
-                    👆 Tap anywhere on the map to pin{' '}
-                    <strong>{isPickingMapPoint === 'start' ? 'Departure (A)' : 'Destination (B)'}</strong>
+                    Tap anywhere on the map to pin{' '}
+                    <strong>
+                      {isPickingMapPoint === 'start' ? 'Departure' : 'Destination'}
+                    </strong>
                   </span>
                   <button
                     type="button"
@@ -632,13 +935,14 @@ export default function App() {
               )}
             </div>
 
-            {/* Full-Bleed Map Area (Lazy-Loaded!) */}
+            {/* Full-Bleed Map Area */}
             <div className="v22-map-stage">
               <MapComponent
                 activeMode="router"
                 userLocation={userLocation}
-                onSetUserLocation={setUserLocation}
-                solarPos={solarPos}
+                onSetUserLocation={handleUpdateUserLocation}
+                gpsRecenterTrigger={gpsRecenterTrigger}
+                solarPos={routeSolarPos}
                 routeData={routeData}
                 selectedRouteType={selectedRouteType}
                 onSelectRouteType={setSelectedRouteType}
@@ -646,59 +950,97 @@ export default function App() {
                 destinationLocation={destinationLocation}
                 isPickingMapPoint={isPickingMapPoint}
                 onMapPointPicked={handleMapPointPicked}
+                show3dBuildings={showRouter3dMap}
+                osmBuildings={osmSpatialData.buildings}
               />
 
               {/* Floating Sunlit Route Highlight Pill */}
-              <div className="v22-map-floating-tag">
-                ☀️ {activeRoute.sunPercent}% Sunlit (+{activeRoute.sunMinutes}m Sun Exposure)
-              </div>
+              {!isEditingRoute && (
+                <div
+                  className={`v22-map-floating-tag ${
+                    sunnyRoute.isNighttime ? 'night' : ''
+                  }`}
+                >
+                  {sunnyRoute.isNighttime
+                    ? 'Nighttime in Łódź (0% Sun) • Sunniest = Shortest'
+                    : `${activeRoute.sunPercent}% Sunlit (+${activeRoute.sunMinutes}m Sun • +${routeDetourPercent}% dist)`}
+                </div>
+              )}
+            </div>
+
+            {/* Floating Bottom-Right Map Control Row (Sits directly above the Bottom Sheet) */}
+            <div className="v22-above-sheet-controls">
+              {gpsToastMessage && (
+                <div className="v22-gps-toast-inline">{gpsToastMessage}</div>
+              )}
+              <button
+                type="button"
+                className={`v22-floating-3d-btn ${showRouter3dMap ? 'active' : ''}`}
+                onClick={() => setShowRouter3dMap((prev) => !prev)}
+                title={
+                  showRouter3dMap
+                    ? 'Hide 2.5D/3D buildings & trees'
+                    : 'Show 2.5D/3D buildings & trees'
+                }
+              >
+                <span className="v22-3d-btn-label">3D</span>
+              </button>
             </div>
 
             {/* Bottom Sheet: Pre-Start Route Selection vs. Active Live Path Session */}
             <div className="v22-bottom-sheet">
               {sessionMode !== 'path' ? (
                 <div id="path-prestart">
-                  <div className="v22-sheet-heading">Compare Routes</div>
+                  <div className="v22-sheet-heading-row">
+                    <span className="v22-sheet-heading">Compare Routes (Max +20% Detour)</span>
+                  </div>
+
                   <div className="v22-route-compare-grid">
-                    {/* Option 1: Sunniest */}
+                    {/* Option 1: Sunniest (Strictly <= +20% of Shortest, and Equal to Shortest at Night!) */}
                     <button
                       type="button"
-                      className={`v22-route-option-card sunny ${selectedRouteType === 'sunny' ? 'selected' : ''}`}
+                      className={`v22-route-option-card sunny ${
+                        selectedRouteType === 'sunny' ? 'selected' : ''
+                      }`}
                       onClick={() => setSelectedRouteType('sunny')}
                     >
                       <div className="v22-route-opt-top">
-                        <span>☀️ Sunniest</span>
+                        <span>Sunniest</span>
                         <span>{sunnyRoute.sunPercent}%</span>
                       </div>
                       <div className="v22-route-opt-time">
                         {sunnyRoute.walkMinutes} min{' '}
                         <span className="v22-route-opt-dist">
-                          {(sunnyRoute.totalDistanceMeters / 1000).toFixed(1)}km
+                          {(sunnyRoute.totalDistanceMeters / 1000).toFixed(2)}km
                         </span>
                       </div>
                       <div className="v22-route-opt-bank emerald">
-                        +{sunnyRoute.sunMinutes}m Sun Bank
+                        {sunnyRoute.isNighttime
+                          ? 'Equal to Shortest (Night)'
+                          : `+${sunnyRoute.sunMinutes}m Sun Bank (+${routeDetourPercent}% dist)`}
                       </div>
                     </button>
 
                     {/* Option 2: Shortest */}
                     <button
                       type="button"
-                      className={`v22-route-option-card shortest ${selectedRouteType === 'shortest' ? 'selected' : ''}`}
+                      className={`v22-route-option-card shortest ${
+                        selectedRouteType === 'shortest' ? 'selected' : ''
+                      }`}
                       onClick={() => setSelectedRouteType('shortest')}
                     >
                       <div className="v22-route-opt-top muted">
-                        <span>⚡ Shortest</span>
+                        <span>Shortest</span>
                         <span>{shortestRoute.sunPercent}%</span>
                       </div>
                       <div className="v22-route-opt-time">
                         {shortestRoute.walkMinutes} min{' '}
                         <span className="v22-route-opt-dist">
-                          {(shortestRoute.totalDistanceMeters / 1000).toFixed(1)}km
+                          {(shortestRoute.totalDistanceMeters / 1000).toFixed(2)}km
                         </span>
                       </div>
                       <div className="v22-route-opt-bank slate">
-                        +{shortestRoute.sunMinutes}m Sun Bank
+                        +{shortestRoute.sunMinutes}m Sun Bank (Direct)
                       </div>
                     </button>
                   </div>
@@ -708,7 +1050,7 @@ export default function App() {
                     className="v22-primary-cta-btn"
                     onClick={() => startSession('path')}
                   >
-                    ☀️ Start Sunlight Path Session
+                    Start Sunlight Path Session
                   </button>
                 </div>
               ) : (
@@ -717,7 +1059,9 @@ export default function App() {
                     <span className="v22-verified-session-badge">
                       ● Live Path Session • GPS Verified
                     </span>
-                    <span className="v22-lux-tag">~12,500 Lux</span>
+                    <span className="v22-lux-tag">
+                      {sunnyRoute.isNighttime ? '0 Lux (Night)' : '~12,500 Lux'}
+                    </span>
                   </div>
 
                   <div className="v22-active-session-metrics">
@@ -767,7 +1111,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================== SCREEN 3: SUNNY SPOTS BY TIME (MAP + SPOT SESSION) ==================== */}
+        {/* ==================== SCREEN 3: SUNNY SPOTS BY TIME (2-STEP OVERVIEW -> WHOLE AREA) ==================== */}
         {activeScreen === 3 && (
           <div className="v22-screen v22-map-screen">
             {/* Floating Top Header + Time Scrubber Control */}
@@ -781,14 +1125,14 @@ export default function App() {
                   ← Home
                 </button>
                 <span className="v22-spots-count-pill">
-                  ☀️ {sunnySpotsCount} Sunlit Spots
+                  {sunnySpotsCount} Sunlit Spots
                 </span>
               </div>
 
               {/* Floating Time Scrubber Card */}
               <div className="v22-scrubber-card">
                 <div className="v22-scrubber-top">
-                  <span className="v22-scrubber-title">🕒 Sunlight at Specific Time</span>
+                  <span className="v22-scrubber-title">Sunlight at Specific Time</span>
                   <span className="v22-scrubber-badge">
                     {HOUR_LABELS[scrubbedHour] || `${scrubbedHour}:00`}
                   </span>
@@ -810,68 +1154,47 @@ export default function App() {
               </div>
             </div>
 
-            {/* Full-Bleed Map with Sun Polygons */}
+            {/* Full-Bleed Map Canvas: Switches between (1) Nearby Pins Overview & (2) Zoomed Whole-Area Polygon View */}
             <div className="v22-map-stage">
               <MapComponent
                 activeMode="spots"
-                spots={allSpots}
+                spots={sortedSpots}
                 windowsBySpotId={windowsBySpotId}
-                selectedSpot={selectedSpot}
-                onSelectSpot={(spot) => setSelectedSpotId(spot.id)}
+                selectedSpot={activeSpotForSession}
+                viewingSpotArea={viewingSpotArea}
+                onSelectSpot={handleSelectSpotArea}
                 userLocation={userLocation}
-                onSetUserLocation={setUserLocation}
-                solarPos={solarPos}
+                onSetUserLocation={handleUpdateUserLocation}
+                gpsRecenterTrigger={gpsRecenterTrigger}
+                solarPos={scrubbedSolarPos}
+                osmBuildings={osmSpatialData.buildings}
               />
             </div>
 
-            {/* Bottom Sheet: Pre-start Spot Info vs. Active Spot Exposure Session */}
-            <div className="v22-bottom-sheet">
-              {sessionMode !== 'spot' ? (
-                <div id="spot-prestart">
-                  {/* Quick Spot Switcher Pills */}
-                  <div className="v22-spot-Horizontal-pills">
-                    {allSpots.slice(0, 6).map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={`v22-mini-spot-pill ${selectedSpot?.id === s.id ? 'active' : ''}`}
-                        onClick={() => setSelectedSpotId(s.id)}
-                      >
-                        {s.name.split(' (')[0]}
-                      </button>
-                    ))}
-                  </div>
+            {/* FLOATING GPS LOCATE-ME BUTTON (Directly above the Bottom Sheet) */}
+            <div className="v22-above-sheet-controls">
+              {gpsToastMessage && (
+                <div className="v22-gps-toast-inline">{gpsToastMessage}</div>
+              )}
+              <button
+                type="button"
+                id="btn-spots-gps"
+                className="v22-floating-gps-btn"
+                onClick={handleLocateUserOnSpotsMap}
+                title="Return to my GPS neighborhood"
+              >
+                🎯
+              </button>
+            </div>
 
-                  <div className="v22-spot-prestart-row">
-                    <div>
-                      <span
-                        className={`v22-sun-window-tag ${isSelectedSpotSunny ? 'sunny' : 'shaded'}`}
-                      >
-                        {isSelectedSpotSunny
-                          ? '11:15 – 14:40 Sun Window'
-                          : '⚠️ Shaded after 14:40'}
-                      </span>
-                      <h3 className="v22-spot-sheet-title">
-                        {selectedSpot?.name?.split(' (')[0] || 'Pasaż Rubinsteina Benches'}
-                      </h3>
-                      <p className="v22-spot-sheet-sub">
-                        {selectedSpotDistance}m away • {isSelectedSpotSunny ? '~12,500 Lux' : '~1,900 Lux (Shade)'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="v22-start-soak-btn"
-                      onClick={() => startSession('spot')}
-                    >
-                      Start Soaking
-                    </button>
-                  </div>
-                </div>
-              ) : (
+            {/* Bottom Sheet Drawer: (1) Nearby Places List -> (2) Selected Whole-Area Details -> (3) Active Session */}
+            <div className="v22-bottom-sheet" id="spots-bottom-drawer">
+              {sessionMode === 'spot' ? (
+                /* STATE 3: Active Spot Exposure Session */
                 <div id="spot-active-session">
                   <div className="v22-active-session-header">
                     <span className="v22-verified-session-badge">
-                      ● Soaking at {selectedSpot?.name?.split(' (')[0]}
+                      ● Soaking at {activeSpotForSession?.name?.split(' (')[0]}
                     </span>
                     <span className="v22-lux-tag">Sunny for 1h 40m</span>
                   </div>
@@ -915,6 +1238,101 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+              ) : viewingSpotArea ? (
+                /* STEP 2: Selected Spot Whole-Area Detail Card (Shown when user clicks a spot) */
+                <div id="spot-area-detail-sheet">
+                  <div className="v22-area-detail-header">
+                    <button
+                      type="button"
+                      className="v22-back-nearby-btn"
+                      onClick={handleBackToNearbySpotsList}
+                    >
+                      ← All Nearby Places
+                    </button>
+                    <span className="v22-distance-pill-blue">
+                      {viewingSpotDistance}m from you
+                    </span>
+                  </div>
+
+                  <div className="v22-area-detail-body">
+                    <div>
+                      <h3 className="v22-spot-sheet-title">
+                        {viewingSpotArea.name.split(' (')[0]}
+                      </h3>
+                      <p className="v22-spot-sheet-sub">
+                        Whole sunlit area shown above •{' '}
+                        {isViewingSpotSunny
+                          ? `${windowsBySpotId[viewingSpotArea.id]?.windowRange || '11:15–14:40'} Sun Window`
+                          : '⚠️ Shaded after 14:40'}
+                      </p>
+                    </div>
+                    <span className="v22-lux-pill-amber">
+                      {isViewingSpotSunny ? '~12.5k lx' : '~1.9k lx'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="v22-primary-cta-btn"
+                    style={{ marginTop: '10px' }}
+                    onClick={() => startSession('spot')}
+                  >
+                    Start Soaking in This Area
+                  </button>
+                </div>
+              ) : (
+                /* STEP 1: Minimal Prompt Until User Selects a Place on the Map */
+                <div id="spot-prestart">
+                  <div
+                    className="v22-drawer-grab-header"
+                    onClick={() => setIsSpotsDrawerExpanded((prev) => !prev)}
+                  >
+                    <div className="v22-grab-bar" />
+                    <div className="v22-drawer-title-row">
+                      <span className="v22-drawer-title">
+                        Tap any pin on map for details
+                      </span>
+                      <span className="v22-drawer-pull-label">
+                        {isSpotsDrawerExpanded
+                          ? '↓ Hide list'
+                          : `↑ Browse list (${sortedSpots.length})`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Scrollable List of Places (Hidden by default until user pulls up / clicks Browse list) */}
+                  {isSpotsDrawerExpanded && (
+                    <div className="v22-more-spots-list">
+                      {sortedSpots.map((spot, idx) => (
+                        <div
+                          key={spot.id}
+                          className="v22-more-spot-item"
+                          onClick={() => handleSelectSpotArea(spot)}
+                        >
+                          <div>
+                            <div className="v22-spot-card-badges">
+                              <span className={idx === 0 ? 'v22-badge-nearest' : 'v22-badge-dist-slate'}>
+                                {idx === 0
+                                  ? `Nearest • ${spot.distanceMeters}m`
+                                  : `${spot.distanceMeters}m away`}
+                              </span>
+                              <span className="v22-badge-sunwindow">
+                                {windowsBySpotId[spot.id]?.windowRange || '10:30–15:10'} ☀️
+                              </span>
+                            </div>
+                            <h4 className="v22-more-spot-title">
+                              {idx + 1}. {spot.name.split(' (')[0]}
+                            </h4>
+                            <p className="v22-nearest-spot-sub">
+                              {spot.categoryLabel || 'Open Sunlit Zone'} • {spot.openSkyPercent || 90}% Sunlit Area
+                            </p>
+                          </div>
+                          <span className="v22-view-area-btn slate">Select ›</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -934,7 +1352,7 @@ export default function App() {
               <span className="v22-catalog-title">Sun Rewards Catalog</span>
             </div>
 
-            {/* ONLY Accumulated Time Exposed (No Live Timer Here!) */}
+            {/* ONLY Accumulated Time Exposed */}
             <div className="v22-sun-bank-hero">
               <div className="v22-hero-top">
                 <span className="v22-hero-eyebrow">Accumulated Sunlight Bank</span>
@@ -976,7 +1394,10 @@ export default function App() {
                 const isUnlocked = totalWeeklyMinutes >= v.requiredMinutes;
                 const isRedeemed = redeemedVoucherIds.includes(v.id);
                 const minsShort = Math.max(0, v.requiredMinutes - totalWeeklyMinutes);
-                const pct = Math.min(100, Math.round((totalWeeklyMinutes / v.requiredMinutes) * 100));
+                const pct = Math.min(
+                  100,
+                  Math.round((totalWeeklyMinutes / v.requiredMinutes) * 100)
+                );
 
                 return (
                   <div
@@ -993,8 +1414,8 @@ export default function App() {
                           {isUnlocked
                             ? `✓ Unlocked • Requires ${v.requiredLabel}`
                             : minsShort <= 30
-                            ? `Requires ${v.requiredLabel} (${minsShort}m more needed)`
-                            : `Requires ${v.requiredLabel} Weekly Goal`}
+                              ? `Requires ${v.requiredLabel} (${minsShort}m more needed)`
+                              : `Requires ${v.requiredLabel} Weekly Goal`}
                         </span>
                         <h3 className="v22-voucher-title">{v.title}</h3>
                         <p className="v22-voucher-venue">{v.venue}</p>
@@ -1032,6 +1453,172 @@ export default function App() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== SCREEN 5: HIDDEN DEBUG TOOL (STREET POINT RAYCAST INSPECTOR) ==================== */}
+        {activeScreen === 5 && (
+          <div className="v22-screen v22-map-screen">
+            <div className="v22-floating-top">
+              <div className="v22-top-nav-row" style={{ justifyContent: 'space-between' }}>
+                <button
+                  type="button"
+                  className="v22-back-home-btn"
+                  onClick={() => setActiveScreen(1)}
+                >
+                  ← Exit Debug
+                </button>
+                <span className="v22-debug-badge-pill">
+                  🛠️ 4 Zones ({totalBldgCount.toLocaleString()} Bldgs • {totalTreeCount.toLocaleString()} Trees)
+                </span>
+              </div>
+
+              {/* Debug Time Mode Switcher (Live Night/Day Clock vs Custom Test Hour) */}
+              <div className="v22-debug-control-card">
+                {/* 4 Pilot Zones Quick-Jump Bar */}
+                <div className="v22-debug-zone-bar">
+                  {PILOT_ZONES.map((zone, idx) => {
+                    const zoneStats = PILOT_ZONES_STATS?.byZone?.find((z) => z.id === zone.id);
+                    const shortLabel =
+                      idx === 0
+                        ? 'Z1: Piotrkowska'
+                        : idx === 1
+                          ? 'Z2: Manufaktura'
+                          : idx === 2
+                            ? 'Z3: OFF / EC1'
+                            : 'Z4: Księży Młyn';
+                    return (
+                      <button
+                        key={zone.id}
+                        type="button"
+                        className={`v22-debug-zone-chip ${activePilotZoneId === zone.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setActivePilotZoneId(zone.id);
+                          setDebugInspectedPoint([...zone.center]);
+                          setDebugFocusCoord([...zone.center]);
+                        }}
+                        title={`${zone.name} (${zoneStats?.buildings || 0} buildings, ${zoneStats?.trees || 0} trees)`}
+                      >
+                        {shortLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="v22-debug-mode-row">
+                  <button
+                    type="button"
+                    className={`v22-debug-mode-btn ${debugTimeMode === 'live' ? 'active' : ''}`}
+                    onClick={() => setDebugTimeMode('live')}
+                  >
+                    🕒 Live Time ({liveSolarPos.elevationDeg}° elev)
+                  </button>
+                  <button
+                    type="button"
+                    className={`v22-debug-mode-btn ${debugTimeMode === 'custom' ? 'active' : ''}`}
+                    onClick={() => setDebugTimeMode('custom')}
+                  >
+                    ☀️ Test Hour ({debugCustomHour}:00)
+                  </button>
+                </div>
+
+                {debugTimeMode === 'custom' && (
+                  <div className="v22-debug-slider-row">
+                    <input
+                      type="range"
+                      min={6}
+                      max={20}
+                      step={1}
+                      value={debugCustomHour}
+                      onChange={(e) => setDebugCustomHour(Number(e.target.value))}
+                      className="v22-range-input"
+                    />
+                    <span className="v22-debug-angle-readout">
+                      Elev {debugSolarPos.elevationDeg}° • Az {debugSolarPos.azimuthDeg}°
+                    </span>
+                  </div>
+                )}
+
+                <div className="v22-debug-pointer-hint">
+                  🎯 <strong>Click any street point on the map</strong> to raycast sunlight vs. 3D buildings &amp; trees.
+                  Cursor: [{debugHoverCoord[1].toFixed(5)}, {debugHoverCoord[0].toFixed(5)}]
+                </div>
+              </div>
+            </div>
+
+            {/* 3D OSM Map with Buildings, Green Tree Crowns, Sidewalks & Solar Ray Vector (No Live GPS on Debug) */}
+            <div className="v22-map-stage">
+              <MapComponent
+                activeMode="debug"
+                debugFocusCoord={debugFocusCoord}
+                solarPos={debugSolarPos}
+                osmBuildings={osmSpatialData.buildings}
+                osmSidewalks={osmSpatialData.sidewalks}
+                inspectionResult={debugInspectionResult}
+                onInspectPoint={(coords) => setDebugInspectedPoint(coords)}
+                onHoverCoord={(coords) => setDebugHoverCoord(coords)}
+              />
+            </div>
+
+            {/* Bottom Diagnostic Sheet showing exact Street Point Raycast Verdict */}
+            <div className="v22-bottom-sheet v22-debug-sheet">
+              {debugInspectionResult && (
+                <div>
+                  <div className="v22-debug-verdict-row">
+                    <span
+                      className={`v22-debug-status-pill ${
+                        debugInspectionResult.isSunny
+                          ? 'sunny'
+                          : debugInspectionResult.status === 'tree-shade'
+                            ? 'tree'
+                            : debugInspectionResult.isNighttime
+                              ? 'night'
+                              : 'shaded'
+                      }`}
+                    >
+                      {debugInspectionResult.statusLabel}
+                    </span>
+                    <span className="v22-debug-coord-tag">
+                      📍 {debugInspectionResult.point[1].toFixed(5)},{' '}
+                      {debugInspectionResult.point[0].toFixed(5)}
+                    </span>
+                  </div>
+
+                  <p className="v22-debug-subtext">{debugInspectionResult.statusSubtext}</p>
+
+                  <div className="v22-debug-telemetry-grid">
+                    <div className="v22-debug-stat-box">
+                      <div className="v22-debug-stat-label">Obstructing Object</div>
+                      <div className="v22-debug-stat-val">
+                        {debugInspectionResult.obstructingObject
+                          ? `${
+                              debugInspectionResult.obstructingObject.type === 'tree' ? '🌳' : '🏢'
+                            } ${debugInspectionResult.obstructingObject.name}`
+                          : debugInspectionResult.isNighttime
+                            ? 'Earth Horizon (Night)'
+                            : 'None (Clear Sky)'}
+                      </div>
+                      <div className="v22-debug-stat-sub">
+                        {debugInspectionResult.obstructingObject
+                          ? `Height: ${debugInspectionResult.obstructingObject.heightMeters}m • Dist: ${debugInspectionResult.obstructingObject.distanceMeters}m • Shadow: ${debugInspectionResult.obstructingObject.shadowLengthMeters}m`
+                          : `Nearest: ${debugInspectionResult.nearestBuilding?.name || 'N/A'} (${debugInspectionResult.nearestBuilding?.distanceMeters || 0}m)`}
+                      </div>
+                    </div>
+
+                    <div className="v22-debug-stat-box">
+                      <div className="v22-debug-stat-label">Street / Pedestrian Sidewalk</div>
+                      <div className="v22-debug-stat-val">
+                        {debugInspectionResult.nearestSidewalk?.name || 'Central Łódź Street'}
+                      </div>
+                      <div className="v22-debug-stat-sub">
+                        Width: {debugInspectionResult.nearestSidewalk?.widthMeters || 4}m • Surface:{' '}
+                        {debugInspectionResult.nearestSidewalk?.surface || 'Paving Stones'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

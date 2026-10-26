@@ -238,6 +238,34 @@ export const SUNNY_AREAS = [
       perk: 'Free traditional pączek with hot winter tea',
       code: 'LUMOS-DYBALSKI'
     }
+  },
+  {
+    id: 'spot-ksiezy-mlyn',
+    name: 'Księży Młyn & Park Źródliska (Palmiarnia Lawn)',
+    category: 'courtyard',
+    categoryLabel: 'Historic Factory & Botanical Lawn',
+    address: 'ul. Księży Młyn 12 / al. Piłsudskiego 61',
+    coordinates: [19.4792, 51.7582],
+    polygon: [
+      [19.4776, 51.7594],
+      [19.4810, 51.7592],
+      [19.4808, 51.7570],
+      [19.4774, 51.7572],
+      [19.4776, 51.7594]
+    ],
+    skyViewFactor: 0.90,
+    minSunElevation: 10,
+    azimuthRange: [110, 245],
+    seatingType: 'Botanical garden benches & revitalized brick factory terraces',
+    windShielding: 'High (shielded by Scheibler red-brick walls)',
+    description: 'Pilot Zone 4 sun pocket combining the historic Scheibler red-brick factory courtyards with the open southern glasshouse lawn around Palmiarnia Łódzka.',
+    partnerCafe: {
+      name: 'Kawiarnia Tubajka (Park Źródliska)',
+      distance: '45m away',
+      address: 'Plac Zwycięstwa 1, Park Źródliska',
+      perk: 'Free roasted almond cookie with hot ginger brew',
+      code: 'LUMOS-TUBAJKA'
+    }
   }
 ];
 

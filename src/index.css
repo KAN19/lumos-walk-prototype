@@ -220,62 +220,96 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.v22-live-info-col {
+  min-width: 0;
+  flex: 1;
 }
 
 .v22-live-session-title {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #FFFFFF;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .v22-live-session-sub {
   font-size: 0.72rem;
-  color: #CBD5E1;
+  color: #94A3B8;
   margin-top: 2px;
 }
 
 .v22-live-timer-col {
   text-align: right;
+  flex-shrink: 0;
 }
 
 .v22-live-timer-val {
   font-family: var(--font-heading);
-  font-size: 1.15rem;
+  font-size: 1.25rem;
   font-weight: 800;
   color: var(--amber-400);
+  line-height: 1;
 }
 
 .v22-live-timer-sub {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   color: #94A3B8;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .v22-live-banner-actions {
   display: flex;
   gap: 8px;
-  margin-top: 11px;
+  margin-top: 12px;
 }
 
-.v22-btn-resume {
+.v22-btn-resume,
+.v22-btn-return-session {
   flex: 1;
-  padding: 7px 12px;
+  padding: 9px 14px;
   border-radius: 12px;
   background: var(--amber-500);
-  color: #020617;
+  color: #0F172A;
   border: none;
-  font-size: 0.75rem;
+  font-size: 0.76rem;
   font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  text-align: center;
 }
 
-.v22-btn-end-small {
-  padding: 7px 12px;
+.v22-btn-resume:hover,
+.v22-btn-return-session:hover {
+  background: var(--amber-400);
+  transform: translateY(-1px);
+}
+
+.v22-btn-end-small,
+.v22-btn-end-session {
+  padding: 9px 16px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.12);
   color: #FFFFFF;
-  border: none;
-  font-size: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.76rem;
   font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.v22-btn-end-small:hover,
+.v22-btn-end-session:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Home Cards */
@@ -736,6 +770,22 @@ button {
   background: #FFFFFF;
 }
 
+.v22-point-footprint {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.v22-point-plain-spacer {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
 .v22-pin-mini-btn {
   padding: 6px 8px;
   border-radius: 10px;
@@ -746,6 +796,16 @@ button {
   font-weight: 700;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.v22-pin-mini-btn.icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
 }
 
 .v22-pin-mini-btn.active {
@@ -807,30 +867,31 @@ button {
   font-weight: 700;
 }
 
-/* Map Endpoint Markers (A = Start, B = Destination) */
+/* Map Endpoint Markers (Start = Footprints, Destination = Plain Dot) */
 .v22-endpoint-marker {
   z-index: 6;
 }
 
 .v22-endpoint-badge {
-  width: 26px;
-  height: 26px;
   border-radius: 9999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.74rem;
-  font-weight: 800;
   color: #FFFFFF;
   border: 2.5px solid #FFFFFF;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.28);
 }
 
 .v22-endpoint-badge.start {
+  width: 28px;
+  height: 28px;
   background: #0F172A;
+  font-size: 0.82rem;
 }
 
 .v22-endpoint-badge.dest {
+  width: 18px;
+  height: 18px;
   background: #F59E0B;
 }
 
@@ -1483,4 +1544,857 @@ button {
 
 .v22-spot-marker.shaded .v22-spot-pill-sub {
   color: var(--text-slate-600);
+}
+
+/* =========================================================================
+   UPDATED SUNNY SPOTS 2-STEP FLOW, REAL GPS BUTTON & HIDDEN DEBUG SCREEN
+   ========================================================================= */
+.v22-hidden-debug-trigger {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 60;
+  padding: 5px 10px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  opacity: 0.45;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.v22-hidden-debug-trigger:hover {
+  opacity: 1;
+  background: #0F172A;
+  color: #FFFFFF;
+}
+
+/* Floating Map Control Row Directly Above Bottom Sheet */
+.v22-above-sheet-controls {
+  position: relative;
+  z-index: 25;
+  margin: auto 14px 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.v22-above-sheet-controls + .v22-bottom-sheet {
+  margin-top: 0;
+}
+
+.v22-gps-toast-inline {
+  padding: 5px 11px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #FFFFFF;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+/* Floating GPS Locate-Me Button (Directly above Bottom Sheet on Screen 3) */
+.v22-floating-gps-btn {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  pointer-events: auto;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.v22-floating-gps-btn:hover {
+  background: #EFF6FF;
+  transform: scale(1.04);
+}
+
+.v22-floating-gps-btn:active {
+  transform: scale(0.95);
+}
+
+.v22-gps-toast {
+  position: absolute;
+  bottom: 62px;
+  right: 14px;
+  padding: 5px 11px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #FFFFFF;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  z-index: 18;
+  white-space: nowrap;
+}
+
+/* User GPS Marker with Pulse & Label */
+.v22-user-gps-pin-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: grab;
+}
+
+.v22-user-gps-pulse {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.25);
+  position: absolute;
+  top: -6px;
+  animation: v22Pulse 1.8s infinite ease-out;
+}
+
+@keyframes v22Pulse {
+  0% {
+    transform: scale(0.75);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+.v22-user-gps-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #2563EB;
+  border: 2.5px solid #FFFFFF;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+  position: relative;
+  z-index: 2;
+}
+
+.v22-user-gps-label {
+  margin-top: 3px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-size: 0.65rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+  white-space: nowrap;
+}
+
+/* Screen 3 Step 1: Neighborhood Overview Ranked Spot Pins */
+.v22-overview-spot-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 14px;
+  background: #FFFFFF;
+  border: 2px solid var(--amber-400);
+  color: var(--text-slate-800);
+  font-size: 0.7rem;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s ease;
+}
+
+.v22-overview-spot-pin:hover {
+  transform: scale(1.06);
+}
+
+.v22-overview-spot-pin.nearest {
+  background: var(--amber-500);
+  border-color: var(--amber-600);
+  color: #FFFFFF;
+}
+
+.v22-overview-spot-pin.shaded {
+  border-color: #94A3B8;
+  background: #F8FAFC;
+  color: #475569;
+}
+
+.v22-pin-dist-badge {
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: rgba(245, 158, 11, 0.15);
+  color: #B45309;
+}
+
+.v22-overview-spot-pin.nearest .v22-pin-dist-badge {
+  background: rgba(255, 255, 255, 0.26);
+  color: #FFFFFF;
+}
+
+/* Screen 3 Step 2: Whole Sunlit Area Footprint Badge on Zoomed Polygon */
+.v22-whole-area-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 9px 13px;
+  border-radius: 20px;
+  background: rgba(254, 243, 199, 0.92);
+  border: 2px solid var(--amber-500);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  text-align: center;
+  pointer-events: none;
+}
+
+.v22-whole-area-badge.shaded {
+  background: rgba(226, 232, 240, 0.94);
+  border-color: #64748B;
+}
+
+.v22-area-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #92400E;
+}
+
+.v22-area-title-pill {
+  margin-top: 3px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: #FFFFFF;
+  color: #451A03;
+  font-size: 0.74rem;
+  font-weight: 800;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.08);
+}
+
+.v22-area-meta {
+  margin-top: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #78350F;
+}
+
+.v22-area-benches-pill {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #78350F;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+/* Screen 3 Bottom Sheet Drawer: Grab Bar + #1 Nearest Card + Pull-up More List */
+.v22-drawer-grab-header {
+  cursor: pointer;
+  padding-bottom: 8px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.v22-grab-bar {
+  width: 38px;
+  height: 5px;
+  border-radius: 9999px;
+  background: #CBD5E1;
+  margin: 0 auto 7px auto;
+}
+
+.v22-drawer-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.v22-drawer-title {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--text-slate-800);
+}
+
+.v22-drawer-pull-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--amber-600);
+}
+
+.v22-nearest-spot-card {
+  padding: 11px 12px;
+  border-radius: 16px;
+  border: 2px solid var(--amber-400);
+  background: rgba(255, 251, 235, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.v22-nearest-spot-card:hover {
+  background: var(--amber-50);
+}
+
+.v22-spot-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.v22-badge-nearest {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.v22-badge-dist-slate {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #E2E8F0;
+  color: #334155;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.v22-badge-sunwindow {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--amber-100);
+  color: var(--amber-800);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.v22-nearest-spot-title {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--text-slate-900);
+  margin-top: 4px;
+}
+
+.v22-nearest-spot-sub {
+  font-size: 0.69rem;
+  color: var(--text-slate-500);
+  margin-top: 1px;
+}
+
+.v22-view-area-btn {
+  padding: 6px 10px;
+  border-radius: 11px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.v22-view-area-btn.amber {
+  background: var(--amber-500);
+  color: #FFFFFF;
+}
+
+.v22-view-area-btn.slate {
+  background: #E2E8F0;
+  color: #334155;
+}
+
+.v22-more-spots-list {
+  margin-top: 9px;
+  max-height: 155px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-right: 3px;
+}
+
+.v22-more-spot-item {
+  padding: 10px 11px;
+  border-radius: 15px;
+  border: 1px solid #E2E8F0;
+  background: #F8FAFC;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.v22-more-spot-item:hover {
+  background: var(--amber-50);
+}
+
+.v22-more-spot-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-slate-900);
+  margin-top: 3px;
+}
+
+/* Screen 3 Step 2: Selected Area Detail Sheet */
+.v22-area-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 7px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.v22-back-nearby-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.v22-back-nearby-btn:hover {
+  color: #0F172A;
+}
+
+.v22-distance-pill-blue {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #EFF6FF;
+  color: #1D4ED8;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.v22-area-detail-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.v22-lux-pill-amber {
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--amber-100);
+  color: var(--amber-800);
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Screen 2 Route Time Mode & Nighttime Styling */
+.v22-map-floating-tag.night {
+  background: #0F172A;
+  color: #F8FAFC;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
+}
+
+.v22-sheet-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.v22-sheet-heading-row .v22-sheet-heading {
+  margin-bottom: 0;
+}
+
+.v22-night-preview-link {
+  background: var(--amber-50);
+  border: 1px solid var(--amber-300);
+  color: var(--amber-800);
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.v22-editor-time-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-top: 2px;
+}
+
+.v22-editor-time-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-slate-500);
+}
+
+.v22-time-mode-chip {
+  flex: 1;
+  padding: 4px 7px;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  background: #F8FAFC;
+  color: var(--text-slate-600);
+  font-size: 0.67rem;
+  font-weight: 700;
+}
+
+.v22-time-mode-chip.active {
+  background: var(--amber-100);
+  border-color: var(--amber-400);
+  color: var(--amber-900);
+}
+
+/* =========================================================================
+   SCREEN 5: HIDDEN DEBUG TOOL (STREET POINT RAYCAST INSPECTOR)
+   ========================================================================= */
+.v22-debug-badge-pill {
+  padding: 6px 10px;
+  border-radius: 14px;
+  background: #0F172A;
+  color: #F8FAFC;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.v22-debug-control-card {
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #F8FAFC;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.v22-debug-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.v22-debug-mode-btn {
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #CBD5E1;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.v22-debug-mode-btn.active {
+  background: var(--amber-500);
+  border-color: var(--amber-400);
+  color: #0F172A;
+}
+
+.v22-debug-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v22-debug-angle-readout {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: #FDE68A;
+  white-space: nowrap;
+}
+
+.v22-debug-pointer-hint {
+  font-size: 0.66rem;
+  color: #94A3B8;
+  line-height: 1.35;
+}
+
+.v22-debug-pointer-hint strong {
+  color: #F8FAFC;
+}
+
+.v22-debug-sheet {
+  background: #0F172A;
+  color: #F8FAFC;
+  border-color: #334155;
+}
+
+.v22-debug-verdict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.v22-debug-status-pill {
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.v22-debug-status-pill.sunny {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.v22-debug-status-pill.tree {
+  background: #D1FAE5;
+  color: #065F46;
+}
+
+.v22-debug-status-pill.shaded {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+
+.v22-debug-status-pill.night {
+  background: #1E293B;
+  color: #93C5FD;
+  border: 1px solid #3B82F6;
+}
+
+.v22-debug-coord-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: #94A3B8;
+}
+
+.v22-debug-subtext {
+  font-size: 0.69rem;
+  color: #CBD5E1;
+  margin-top: 6px;
+  line-height: 1.35;
+}
+
+.v22-debug-telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.v22-debug-stat-box {
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.v22-debug-stat-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  color: #94A3B8;
+  font-weight: 700;
+}
+
+.v22-debug-stat-val {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v22-debug-stat-sub {
+  font-size: 0.63rem;
+  color: #94A3B8;
+  margin-top: 1px;
+}
+
+.v22-debug-point-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2.5px solid #FFFFFF;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.38);
+  font-size: 0.85rem;
+}
+
+.v22-debug-point-pin.sunny {
+  background: #F59E0B;
+}
+
+.v22-debug-point-pin.tree {
+  background: #10B981;
+}
+
+.v22-debug-point-pin.shaded {
+  background: #EF4444;
+}
+
+.v22-debug-point-pin.night {
+  background: #1E293B;
+}
+
+.v22-debug-zone-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.v22-debug-zone-chip {
+  padding: 5px 4px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1E293B;
+  color: #CBD5E1;
+  font-size: 0.63rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.v22-debug-zone-chip.active {
+  background: #FEF3C7;
+  color: #92400E;
+  border-color: #F59E0B;
+  font-weight: 800;
+}
+
+/* ==================== SCREEN 2: INLINE GPS OPTION IN EDITOR + BOTTOM-RIGHT 3D ICON ==================== */
+.v22-use-gps-inline-row {
+  display: flex;
+  padding-left: 30px;
+  margin-top: -2px;
+  margin-bottom: 4px;
+}
+
+.v22-use-gps-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  color: #1D4ED8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v22-use-gps-inline-btn.active {
+  background: #DBEAFE;
+  border-color: #3B82F6;
+  color: #1E40AF;
+  font-weight: 800;
+}
+
+.v22-floating-3d-btn {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 1.5px solid #E2E8F0;
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0px;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.v22-floating-3d-btn:hover {
+  transform: translateY(-1px);
+}
+
+.v22-floating-3d-btn.active {
+  background: #0F172A;
+  border-color: #F59E0B;
+  color: #FEF3C7;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25), 0 6px 18px rgba(15, 23, 42, 0.28);
+}
+
+.v22-3d-btn-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* ==================== SCREEN 3 COMPACT CIRCULAR SPOT PINS (NO TEXT OVERLAP) ==================== */
+.v22-compact-spot-pin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.v22-compact-spot-pin:hover {
+  transform: scale(1.16);
+  z-index: 25;
+}
+
+.v22-compact-spot-pin.sunny {
+  background: #FEF3C7;
+  border: 2.5px solid #F59E0B;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+}
+
+.v22-compact-spot-pin.shaded {
+  background: #F1F5F9;
+  border: 2px solid #94A3B8;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+  opacity: 0.85;
+}
+
+.v22-compact-spot-pin.nearest {
+  width: 38px;
+  height: 38px;
+  border: 2.5px solid #2563EB;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2), 0 5px 14px rgba(15, 23, 42, 0.24);
+  z-index: 15;
+}
+
+.v22-compact-pin-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.v22-compact-pin-nearest-dot {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-size: 0.56rem;
+  font-weight: 800;
+  border: 1.5px solid #FFFFFF;
 }
