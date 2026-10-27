@@ -56,6 +56,7 @@ export default function MapComponent({
   const onDeselectSpotRef = useRef(onDeselectSpot);
   const onZoomChangeRef = useRef(onZoomChange);
   const show3dBuildingsRef = useRef(show3dBuildings);
+  const lastGpsRecenterRef = useRef(gpsRecenterTrigger);
 
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
@@ -967,15 +968,16 @@ export default function MapComponent({
       const el = document.createElement('div');
       el.className = `v22-whole-area-badge ${isSunny ? 'sunny' : 'shaded'}`;
       el.innerHTML = `
-        <button type="button" class="v22-badge-close-btn" title="Close footprint and return to overview" aria-label="Close footprint">×</button>
-        <div class="v22-area-eyebrow">Whole Sunlit Area Footprint</div>
-        <div class="v22-area-title-pill">${isSunny ? '☀️' : '☁️'} ${viewingSpotArea.name.split(' (')[0]}</div>
-        <div class="v22-area-meta">${
-          isSunny
-            ? `${viewingSpotArea.openSkyPercent || 90}% Unshaded • ${win?.label || 'Sunny until 14:40'}`
-            : '⚠️ Enters building/tree shade at this hour'
-        }</div>
-        <div class="v22-area-benches-pill">🪑 ${viewingSpotArea.benchesCount || 6} Benches in Area</div>
+        <div class="v22-badge-compact-row">
+          <span class="v22-badge-status-dot">${isSunny ? '☀️' : '☁️'}</span>
+          <span class="v22-badge-title-text">${viewingSpotArea.name.split(' (')[0]}</span>
+          <span class="v22-badge-mini-stat">${isSunny ? `${viewingSpotArea.openSkyPercent || 90}% Sun` : 'Shaded'}</span>
+          <button type="button" class="v22-badge-close-btn" title="Close footprint and return to overview" aria-label="Close footprint">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+            </svg>
+          </button>
+        </div>
       `;
 
       // Interactive close button to dismiss the whole sunlit area modal
@@ -1059,32 +1061,22 @@ export default function MapComponent({
   ]);
 
   // Camera transitions in Screen 3:
-  // - When viewingSpotArea is selected: zoom into the Whole Sunlit Area Footprint
-  // - If 3D mode is active, smoothly tilt camera; if 2D, stay top-down
-  // - When returning to Neighborhood Overview (viewingSpotArea === null): DO NOT force fly to GPS location!
-  //   Instead, smoothly reset tilt & bearing to 0 at the current view.
+  // - When viewingSpotArea is selected: smoothly navigate and zoom into the Whole Sunlit Area Footprint
   useEffect(() => {
     if (!mapRef.current || !isMapReady || activeMode !== 'spots') return;
+    if (!viewingSpotArea || !viewingSpotArea.coordinates) return;
 
-    if (viewingSpotArea && viewingSpotArea.coordinates) {
-      const is3dActive = Boolean(show3dBuildingsRef.current);
-      mapRef.current.flyTo({
-        center: viewingSpotArea.coordinates,
-        zoom: 16.6,
-        pitch: is3dActive ? 46 : 0,
-        bearing: is3dActive ? -12 : 0,
-        offset: [0, -25],
-        duration: 650
-      });
-    } else {
-      // Just ease pitch and bearing back to standard top-down view without moving center away!
-      mapRef.current.easeTo({
-        pitch: 0,
-        bearing: 0,
-        duration: 450
-      });
-    }
-  }, [isMapReady, viewingSpotArea, activeMode]);
+    const is3dActive = Boolean(show3dBuildingsRef.current);
+    mapRef.current.flyTo({
+      center: viewingSpotArea.coordinates,
+      zoom: 16.6,
+      pitch: is3dActive ? 46 : 0,
+      bearing: is3dActive ? -12 : 0,
+      offset: [0, -35],
+      duration: 750,
+      essential: true
+    });
+  }, [viewingSpotArea, activeMode, isMapReady]);
 
   // Navigate to Central Łódź when entering Sunlight Path or Sunny Spots
   useEffect(() => {
@@ -1097,7 +1089,8 @@ export default function MapComponent({
       zoom: 14.3,
       pitch: 0,
       bearing: 0,
-      duration: 650
+      duration: 650,
+      essential: true
     });
   }, [lodzCenterNavTrigger, isMapReady, activeMode]);
 
@@ -1105,26 +1098,27 @@ export default function MapComponent({
   useEffect(() => {
     if (!mapRef.current || !isMapReady) return;
     if (activeMode !== 'router' && activeMode !== 'spots' && activeMode !== 'debug') return;
-    const is3dActive = Boolean(show3dBuildings) && mapZoom >= 14.5;
+    const is3dActive = Boolean(show3dBuildings);
     mapRef.current.easeTo({
       pitch: is3dActive ? 46 : 0,
       bearing: is3dActive ? -12 : 0,
-      duration: 550
+      duration: 500
     });
-  }, [show3dBuildings, mapZoom, isMapReady, activeMode]);
+  }, [show3dBuildings, isMapReady, activeMode]);
 
   // Explicit GPS Recenter Button Trigger
   useEffect(() => {
     if (!mapRef.current || !isMapReady || !gpsRecenterTrigger || !userLocation) return;
-    const is3dActive = (activeMode === 'router' || activeMode === 'spots') && show3dBuildings;
+    const is3dActive = (activeMode === 'router' || activeMode === 'spots') && Boolean(show3dBuildingsRef.current);
     mapRef.current.flyTo({
       center: userLocation,
-      zoom: is3dActive ? 15.8 : 14.8,
+      zoom: is3dActive ? 15.8 : 15.2,
       pitch: is3dActive ? 46 : 0,
       bearing: is3dActive ? -12 : 0,
-      duration: 600
+      duration: 750,
+      essential: true
     });
-  }, [gpsRecenterTrigger, isMapReady, userLocation, activeMode, show3dBuildings]);
+  }, [gpsRecenterTrigger]);
 
   // Fly camera when selecting one of the 4 Pilot Zones in Debug mode
   useEffect(() => {

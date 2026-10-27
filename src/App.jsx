@@ -716,11 +716,13 @@ export default function App() {
   // Step 1 -> Step 2 on Screen 3 (Sunny Spots): Click a spot to zoom into its Whole Sunlit Area Footprint
   const handleSelectSpotArea = (spot) => {
     setSelectedSpotId(spot.id);
-    setViewingSpotArea(spot);
+    setViewingSpotArea({ ...spot, _t: Date.now() });
+    setIsSpotsDrawerExpanded(false);
   };
 
   const handleBackToNearbySpotsList = () => {
     setViewingSpotArea(null);
+    setSelectedSpotId(null);
   };
 
   // Clicking outside a chosen spot on the map unselects it
@@ -731,6 +733,10 @@ export default function App() {
 
   const handleLocateUserOnSpotsMap = () => {
     setViewingSpotArea(null);
+    setSelectedSpotId(null);
+    setIsSpotsDrawerExpanded(false);
+    setGpsRecenterTrigger((n) => n + 1);
+    triggerGpsToast('📍 Centering on your location...');
     requestRealGps(true);
   };
 
@@ -1481,6 +1487,19 @@ export default function App() {
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                id="btn-router-gps"
+                className="v22-floating-gps-btn"
+                onClick={() => {
+                  setGpsRecenterTrigger((n) => n + 1);
+                  triggerGpsToast('📍 Centering on your location...');
+                  requestRealGps(true);
+                }}
+                title="Return to my GPS neighborhood"
+              >
+                🎯
+              </button>
             </div>
 
             {/* Bottom Sheet: Pre-Start Route Selection vs. Active Live Path Session */}
@@ -1845,7 +1864,9 @@ export default function App() {
                         title="Close spot details and return to overview"
                         aria-label="Close spot details"
                       >
-                        ×
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                          <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -2259,6 +2280,19 @@ export default function App() {
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                id="btn-debug-gps"
+                className="v22-floating-gps-btn"
+                onClick={() => {
+                  setGpsRecenterTrigger((n) => n + 1);
+                  triggerGpsToast('📍 Centering on your location...');
+                  requestRealGps(true);
+                }}
+                title="Return to my GPS neighborhood"
+              >
+                🎯
+              </button>
             </div>
 
             {/* Bottom Diagnostic Sheet showing exact Street Point Raycast Verdict */}

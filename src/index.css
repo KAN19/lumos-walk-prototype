@@ -2249,55 +2249,93 @@ button {
 }
 
 /* Screen 3 Step 2: Whole Sunlit Area Footprint Badge on Zoomed Polygon */
+/* Screen 3 Step 2: Whole Sunlit Area Footprint Compact Badge on Zoomed Polygon */
 .v22-whole-area-badge {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  padding: 9px 26px 9px 13px;
-  border-radius: 20px;
-  background: rgba(254, 243, 199, 0.94);
-  border: 2px solid var(--amber-500);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-  text-align: center;
+  padding: 5px 8px 5px 11px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid var(--amber-500);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
   pointer-events: auto;
+  white-space: nowrap;
+  max-width: 270px;
+  user-select: none;
+}
+
+.v22-whole-area-badge.shaded {
+  background: rgba(248, 250, 252, 0.96);
+  border-color: #94A3B8;
+}
+
+.v22-badge-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v22-badge-status-dot {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.v22-badge-title-text {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #0F172A;
+  max-width: 135px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v22-badge-mini-stat {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #B45309;
+}
+
+.v22-whole-area-badge.shaded .v22-badge-mini-stat {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
 }
 
 .v22-badge-close-btn {
-  position: absolute;
-  top: 6px;
-  right: 7px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(146, 64, 14, 0.14);
-  color: #92400E;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
-  pointer-events: auto;
-  z-index: 10;
+  margin-left: 3px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .v22-badge-close-btn:hover {
-  background: rgba(146, 64, 14, 0.28);
-  color: #78350F;
-  transform: scale(1.12);
+  background: rgba(15, 23, 42, 0.18);
+  color: #0F172A;
+  transform: scale(1.1);
 }
 
 .v22-whole-area-badge.shaded .v22-badge-close-btn {
-  background: rgba(100, 116, 139, 0.2);
+  background: rgba(100, 116, 139, 0.14);
   color: #334155;
 }
 
 .v22-whole-area-badge.shaded .v22-badge-close-btn:hover {
-  background: rgba(100, 116, 139, 0.35);
+  background: rgba(100, 116, 139, 0.25);
   color: #0F172A;
 }
 
@@ -2308,62 +2346,20 @@ button {
   border: none;
   background: #E2E8F0;
   color: #475569;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.15s ease;
   margin-left: 6px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .v22-sheet-close-btn:hover {
   background: #CBD5E1;
   color: #0F172A;
   transform: scale(1.08);
-}
-
-.v22-whole-area-badge.shaded {
-  background: rgba(226, 232, 240, 0.94);
-  border-color: #64748B;
-}
-
-.v22-area-eyebrow {
-  font-size: 0.62rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #92400E;
-}
-
-.v22-area-title-pill {
-  margin-top: 3px;
-  padding: 3px 10px;
-  border-radius: 9999px;
-  background: #FFFFFF;
-  color: #451A03;
-  font-size: 0.74rem;
-  font-weight: 800;
-  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.08);
-}
-
-.v22-area-meta {
-  margin-top: 4px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: #78350F;
-}
-
-.v22-area-benches-pill {
-  margin-top: 4px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.85);
-  color: #78350F;
-  font-size: 0.65rem;
-  font-weight: 700;
 }
 
 /* Screen 3 Bottom Sheet Drawer: Grab Bar + #1 Nearest Card + Pull-up More List */
