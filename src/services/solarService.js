@@ -2,11 +2,71 @@ import SunCalc from 'suncalc';
 import { LODZ_CENTER } from '../data/sunnySpotsLodz';
 
 /**
+ * Resolves a Date and ISO string for a given hour in Łódź (Europe/Warsaw timezone).
+ * When hour is null, returns the current instant in Łódź.
+ */
+export function getLodzDateTime(hour = null, minute = 0) {
+  const now = new Date();
+  const lodzYMD = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(now);
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Warsaw',
+    timeZoneName: 'longOffset'
+  }).formatToParts(now);
+  const offsetPart = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT+01:00';
+  const tzOffset = offsetPart.replace('GMT', '');
+
+  if (hour === null) {
+    return {
+      date: now,
+      isoString: now.toISOString(),
+      isoWithOffset: now.toISOString(),
+      lodzYMD,
+      tzOffset
+    };
+  }
+
+  const hStr = String(Math.floor(hour)).padStart(2, '0');
+  const mStr = String(Math.floor(minute)).padStart(2, '0');
+  const isoWithOffset = `${lodzYMD}T${hStr}:${mStr}:00${tzOffset}`;
+  const targetDate = new Date(isoWithOffset);
+
+  return {
+    date: targetDate,
+    isoString: targetDate.toISOString(),
+    isoWithOffset,
+    lodzYMD,
+    tzOffset
+  };
+}
+
+/**
+ * Returns the current hour and minute in Łódź local time (Europe/Warsaw timezone).
+ */
+export function getLodzCurrentTimeParts(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Warsaw',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false
+  }).formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? now.getHours());
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? now.getMinutes());
+  return { hour, minute };
+}
+
+/**
  * Converts SunCalc's azimuth (where 0 is South, -pi/2 is East)
  * to standard compass bearing (0° North, 90° East, 180° South, 270° West).
  */
 export function getCompassSolarPosition(date, lat = LODZ_CENTER.lat, lng = LODZ_CENTER.lng) {
-  const sunPos = SunCalc.getPosition(date, lat, lng);
+  const d = date instanceof Date ? date : new Date(date);
+  const sunPos = SunCalc.getPosition(d, lat, lng);
   const elevationDeg = (sunPos.altitude * 180) / Math.PI;
   // SunCalc returns azimuth: 0 = South, -PI = North, -PI/2 = East, PI/2 = West
   // Standard compass bearing: 0 = North, 90 = East, 180 = South, 270 = West
@@ -17,7 +77,8 @@ export function getCompassSolarPosition(date, lat = LODZ_CENTER.lat, lng = LODZ_
     elevationDeg: Math.round(elevationDeg * 10) / 10,
     azimuthDeg: Math.round(compassBearing * 10) / 10,
     rawAltitude: sunPos.altitude,
-    rawAzimuth: sunPos.azimuth
+    rawAzimuth: sunPos.azimuth,
+    datetime: d.toISOString()
   };
 }
 

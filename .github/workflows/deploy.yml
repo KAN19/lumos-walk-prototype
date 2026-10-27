@@ -1,0 +1,67 @@
+name: Deploy Lumos Frontend to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Production Bundle
+        env:
+          VITE_BACKEND_URL: ""
+        run: npm run build
+
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync Frontend Build & Nginx Config to VPS
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /docker/lumos/frontend/dist"
+          
+          # Sync built static files
+          rsync -avz --delete \
+            dist/ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/docker/lumos/frontend/dist/
+
+          # Sync Nginx container configuration
+          scp nginx.conf ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/docker/lumos/frontend/nginx.conf
+
+      - name: Restart Frontend Container
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+            cd /docker/lumos && \
+            docker compose up -d --no-deps frontend
+          "
+
+      - name: Verify Frontend Health
+        run: |
+          sleep 3
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+            docker ps --filter name=lumos-frontend --format '{{.Status}}'
+            echo '✅ Frontend updated and active!'
+          "

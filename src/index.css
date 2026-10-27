@@ -2842,6 +2842,87 @@ button {
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25), 0 6px 18px rgba(15, 23, 42, 0.28);
 }
 
+.v22-floating-3d-btn.disabled,
+.v22-floating-3d-btn:disabled {
+  background: #F1F5F9 !important;
+  border-color: #CBD5E1 !important;
+  color: #94A3B8 !important;
+  cursor: not-allowed !important;
+  opacity: 0.55 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.v22-floating-3d-btn.disabled .v22-3d-btn-label,
+.v22-floating-3d-btn:disabled .v22-3d-btn-label {
+  color: #94A3B8 !important;
+}
+
+/* Floating 3D Button Wrapper & Disabled Reason Tooltip */
+.v22-3d-btn-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.v22-3d-disabled-tooltip {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0F172A;
+  color: #F8FAFC;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 7px 11px;
+  border-radius: 9px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.35), 0 2px 6px rgba(0, 0, 0, 0.18);
+  border: 1px solid #334155;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 100;
+}
+
+.v22-3d-disabled-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #0F172A transparent transparent transparent;
+}
+
+.v22-3d-tooltip-icon {
+  font-size: 0.85rem;
+  color: #F59E0B;
+  flex-shrink: 0;
+}
+
+.v22-3d-btn-wrapper:hover .v22-3d-disabled-tooltip,
+.v22-3d-btn-wrapper:focus-within .v22-3d-disabled-tooltip,
+.v22-3d-disabled-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.v22-now-btn.disabled,
+.v22-now-btn:disabled {
+  background: #1E293B !important;
+  border-color: #334155 !important;
+  color: #64748B !important;
+  cursor: not-allowed !important;
+  opacity: 0.5 !important;
+}
+
 .v22-3d-btn-label {
   font-size: 0.78rem;
   font-weight: 800;

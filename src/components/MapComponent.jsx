@@ -9,6 +9,7 @@ import {
   createTreeCrownPolygon,
   filterNearbySidewalks
 } from '../services/osmShadowService';
+import { getBackendBaseUrl } from '../services/apiConfig';
 
 export default function MapComponent({
   activeMode = 'router', // 'router' | 'spots' | 'debug'
@@ -37,7 +38,8 @@ export default function MapComponent({
   osmSidewalks = VERIFIED_REAL_OSM_SIDEWALKS,
   inspectionResult = null,
   onInspectPoint,
-  onHoverCoord
+  onHoverCoord,
+  onZoomChange = null
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -52,11 +54,18 @@ export default function MapComponent({
   const onInspectPointRef = useRef(onInspectPoint);
   const onHoverCoordRef = useRef(onHoverCoord);
   const onDeselectSpotRef = useRef(onDeselectSpot);
+  const onZoomChangeRef = useRef(onZoomChange);
+
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
 
   // Track when the MapLibre style & canvas are ready so layers ALWAYS render
   const [isMapReady, setIsMapReady] = useState(false);
   // Track current map zoom for zoom-dependent spot level of detail (LOD) filtering
   const [mapZoom, setMapZoom] = useState(14.6);
+  // Dynamic viewport-streamed obstacles (loaded on-demand for active camera bbox)
+  const [viewportObstacles, setViewportObstacles] = useState(null);
 
   useEffect(() => {
     isPickingMapPointRef.current = isPickingMapPoint;
@@ -84,10 +93,11 @@ export default function MapComponent({
   }, [onDeselectSpot]);
 
   // Build GeoJSON for 3D OSM Buildings + 3D OSM Tree Crowns
-  const getOsm3dObjectsGeoJson = useCallback(() => {
+  const getOsm3dObjectsGeoJson = useCallback((obstaclesList = null) => {
+    const list = obstaclesList !== null ? obstaclesList : (osmBuildings || VERIFIED_REAL_OSM_BUILDINGS);
     return {
       type: 'FeatureCollection',
-      features: (osmBuildings || VERIFIED_REAL_OSM_BUILDINGS).map((obj) => ({
+      features: (list || []).map((obj) => ({
         type: 'Feature',
         id: obj.id,
         properties: {
@@ -104,6 +114,64 @@ export default function MapComponent({
         }
       }))
     };
+  }, [osmBuildings]);
+
+  // Stream/filter obstacles dynamically matching the active camera viewport
+  const fetchVisibleViewportObstacles = useCallback(async (map) => {
+    if (!map) return;
+    const currentZoom = map.getZoom();
+    if (currentZoom < 14.5) {
+      setViewportObstacles([]);
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const lngSpan = bounds.getEast() - bounds.getWest();
+    const latSpan = bounds.getNorth() - bounds.getSouth();
+    // 15% safety buffer beyond viewport edges so panning doesn't pop in
+    const minLng = bounds.getWest() - lngSpan * 0.15;
+    const minLat = bounds.getSouth() - latSpan * 0.15;
+    const maxLng = bounds.getEast() + lngSpan * 0.15;
+    const maxLat = bounds.getNorth() + latSpan * 0.15;
+    const bboxStr = `${minLng.toFixed(5)},${minLat.toFixed(5)},${maxLng.toFixed(5)},${maxLat.toFixed(5)}`;
+
+    const backendUrl = getBackendBaseUrl();
+    try {
+      const res = await fetch(`${backendUrl}/api/v1/spatial/obstacles?bbox=${bboxStr}`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      if (res.ok) {
+        const geojson = await res.json();
+        if (geojson && Array.isArray(geojson.features) && geojson.features.length > 0) {
+          const streamed = geojson.features
+            .map((f) => ({
+              id: f.id,
+              name: f.properties?.name || 'Building',
+              heightMeters: f.properties?.height_meters || 15,
+              trunkClearanceMeters: f.properties?.trunk_clearance_meters || 2.2,
+              type: f.properties?.type || 'building',
+              polygon: f.geometry?.coordinates?.[0] || []
+            }))
+            .filter((b) => b.polygon && b.polygon.length >= 3);
+
+          if (streamed.length > 0) {
+            setViewportObstacles(streamed);
+            return;
+          }
+        }
+      }
+    } catch {
+      // Backend not running / offline -> smoothly fallback to local verified obstacles filtered to bbox
+    }
+
+    // Local spatial filter fallback for active camera viewport
+    const sourceList = osmBuildings || VERIFIED_REAL_OSM_BUILDINGS;
+    const filtered = sourceList.filter((b) => {
+      const pt = b.center || (b.polygon && b.polygon[0]);
+      if (!pt) return false;
+      return pt[0] >= minLng && pt[0] <= maxLng && pt[1] >= minLat && pt[1] <= maxLat;
+    });
+    setViewportObstacles(filtered);
   }, [osmBuildings]);
 
   // Build GeoJSON for OSM Pedestrian Sidewalks (shown in Debug mode around inspected point)
@@ -198,7 +266,12 @@ export default function MapComponent({
     if (!map) return;
 
     const isDebugView = activeMode === 'debug';
-    const shouldShow3d = Boolean(show3dBuildings);
+    const isZoomAllowedFor3d = mapZoom >= 14.5;
+    const shouldShow3d = Boolean(show3dBuildings) && isZoomAllowedFor3d;
+
+    const activeObstacles = viewportObstacles !== null
+      ? viewportObstacles
+      : (osmBuildings || VERIFIED_REAL_OSM_BUILDINGS);
 
     const focusPointForShadows = isDebugView
       ? inspectionResult?.point || [19.4574, 51.7678]
@@ -206,14 +279,14 @@ export default function MapComponent({
 
     const shadowsGeoJson = shouldShow3d
       ? generateAllBuildingShadowsGeoJson(
-          osmBuildings || VERIFIED_REAL_OSM_BUILDINGS,
+          activeObstacles,
           solarPos,
           focusPointForShadows
         )
       : { type: 'FeatureCollection', features: [] };
 
     const objects3dGeoJson = shouldShow3d
-      ? getOsm3dObjectsGeoJson()
+      ? getOsm3dObjectsGeoJson(activeObstacles)
       : { type: 'FeatureCollection', features: [] };
 
     const sidewalksGeoJson = getOsmSidewalksGeoJson();
@@ -240,6 +313,7 @@ export default function MapComponent({
           id: 'osm-shadows-fill',
           type: 'fill',
           source: 'osm-shadows-source',
+          minzoom: 14.5,
           paint: {
             'fill-color': [
               'match',
@@ -273,6 +347,7 @@ export default function MapComponent({
           id: 'osm-3d-objects-extrusion',
           type: 'fill-extrusion',
           source: 'osm-3d-objects-source',
+          minzoom: 14.5,
           paint: {
             'fill-extrusion-color': ['get', 'color'],
             'fill-extrusion-height': ['get', 'height'],
@@ -358,7 +433,9 @@ export default function MapComponent({
     routeData,
     userLocation,
     viewingSpotArea,
-    inspectionResult
+    inspectionResult,
+    mapZoom,
+    viewportObstacles
   ]);
 
   // Sync Sunny Spot polygons & User GPS Radar on Screen 3
@@ -598,14 +675,18 @@ export default function MapComponent({
       style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
       center: [LODZ_CENTER.lng, LODZ_CENTER.lat],
       zoom: activeMode === 'debug' ? 16.2 : 14.3,
-      pitch: activeMode === 'debug' ? 45 : 0,
+      pitch: 0,
       bearing: 0,
       attributionControl: false
     });
 
     map.on('load', () => {
       setIsMapReady(true);
-      setMapZoom(map.getZoom());
+      const z = map.getZoom();
+      setMapZoom(z);
+      if (onZoomChangeRef.current) {
+        onZoomChangeRef.current(z);
+      }
       if (activeMode !== 'debug') {
         map.jumpTo({
           center: [LODZ_CENTER.lng, LODZ_CENTER.lat],
@@ -617,7 +698,11 @@ export default function MapComponent({
     });
 
     map.on('zoom', () => {
-      setMapZoom(map.getZoom());
+      const z = map.getZoom();
+      setMapZoom(z);
+      if (onZoomChangeRef.current) {
+        onZoomChangeRef.current(z);
+      }
     });
 
     map.on('mousemove', (e) => {
@@ -649,6 +734,32 @@ export default function MapComponent({
       mapRef.current = null;
     };
   }, []);
+
+  // Viewport camera move listener for dynamic obstacle streaming
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) return;
+
+    let debounceTimer = null;
+    const handleCameraChange = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchVisibleViewportObstacles(map);
+      }, 250);
+    };
+
+    map.on('moveend', handleCameraChange);
+    map.on('zoomend', handleCameraChange);
+
+    // Initial check on mount
+    handleCameraChange();
+
+    return () => {
+      clearTimeout(debounceTimer);
+      map.off('moveend', handleCameraChange);
+      map.off('zoomend', handleCameraChange);
+    };
+  }, [isMapReady, fetchVisibleViewportObstacles]);
 
   // Sync layers whenever map becomes ready OR routeData/spots/debug state update
   useEffect(() => {
@@ -973,12 +1084,13 @@ export default function MapComponent({
   useEffect(() => {
     if (!mapRef.current || !isMapReady) return;
     if (activeMode !== 'router' && activeMode !== 'debug') return;
+    const is3dActive = Boolean(show3dBuildings) && mapZoom >= 14.5;
     mapRef.current.easeTo({
-      pitch: show3dBuildings ? 46 : 0,
-      bearing: show3dBuildings ? -12 : 0,
+      pitch: is3dActive ? 46 : 0,
+      bearing: is3dActive ? -12 : 0,
       duration: 550
     });
-  }, [show3dBuildings, isMapReady, activeMode]);
+  }, [show3dBuildings, mapZoom, isMapReady, activeMode]);
 
   // Explicit GPS Recenter Button Trigger
   useEffect(() => {

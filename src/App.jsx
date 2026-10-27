@@ -9,7 +9,9 @@ import {
 } from './services/sunPathRoutingService';
 import {
   getCompassSolarPosition,
-  calculateSunWindow
+  calculateSunWindow,
+  getLodzDateTime,
+  getLodzCurrentTimeParts
 } from './services/solarService';
 import {
   VERIFIED_REAL_OSM_BUILDINGS,
@@ -33,6 +35,9 @@ const HOUR_LABELS = {
   15: '15:00 (Golden Hour)',
   16: '16:00 (Shaded)'
 };
+
+// Maximum allowed detour for sunniest walking path (1.20 = max +20% extra walk)
+export const DEFAULT_MAX_DETOUR_RATIO = 1.20;
 
 const WEEKLY_VOUCHERS = [
   {
@@ -168,10 +173,26 @@ export default function App() {
   const [isEditingRoute, setIsEditingRoute] = useState(false);
   const [isPickingMapPoint, setIsPickingMapPoint] = useState(null);
   const [showRouter3dMap, setShowRouter3dMap] = useState(false); // ON/OFF toggle for 2.5D/3D buildings & trees on Sunlight Path
+  const [mapCurrentZoom, setMapCurrentZoom] = useState(14.3);
+  const is3dAllowedAtCurrentZoom = mapCurrentZoom >= 14.5;
+  const [show3dDisabledToast, setShow3dDisabledToast] = useState(false);
+
+  // When user zooms out (< 14.5), turn off 3D mode.
+  // When user zooms in (>= 14.5), do NOT auto-switch to 3D; keep 2D and only enable the button!
+  const handleMapZoomChange = useCallback((newZoom) => {
+    setMapCurrentZoom(newZoom);
+    if (newZoom < 14.5) {
+      setShowRouter3dMap(false);
+      setShowDebug3dMap(false);
+    }
+  }, []);
+
   // Screen 2 (Sunlight Path) Solar Time Selection State
   const [routeTimeHour, setRouteTimeHour] = useState(12);
   const [routeTimeIsNow, setRouteTimeIsNow] = useState(true);
   const [appliedRouteTime, setAppliedRouteTime] = useState({ isNow: true, hour: 12 });
+  // Configurable internal detour tolerance (default +20% extra walk)
+  const [maxDetourRatio] = useState(DEFAULT_MAX_DETOUR_RATIO);
 
   // Screen 5 (Hidden Debug Street Raycast Tool) State
   const [debugTimeMode, setDebugTimeMode] = useState('live'); // 'live' | 'custom'
@@ -180,7 +201,7 @@ export default function App() {
   const [debugInspectedPoint, setDebugInspectedPoint] = useState([19.4574, 51.7678]);
   const [activePilotZoneId, setActivePilotZoneId] = useState('zone-1-piotrkowska');
   const [debugFocusCoord, setDebugFocusCoord] = useState(null);
-  const [showDebug3dMap, setShowDebug3dMap] = useState(true); // ON/OFF toggle for 3D buildings & tree crowns on Debug Screen
+  const [showDebug3dMap, setShowDebug3dMap] = useState(false); // OFF by default; user must choose to turn it on
 
   // Show temporary GPS toast
   const triggerGpsToast = useCallback((msg) => {
@@ -281,8 +302,16 @@ export default function App() {
 
     fetchLiveOsmSpatialData(DEFAULT_USER_LOCATION, 400)
       .then((data) => {
-        if (data && data.buildings) {
-          setOsmSpatialData(data);
+        if (data && data.buildings && data.buildings.length > 0) {
+          setOsmSpatialData((prev) => {
+            const existingIds = new Set(prev.buildings.map((b) => b.id));
+            const newBldgs = data.buildings.filter((b) => !existingIds.has(b.id));
+            if (newBldgs.length === 0) return prev;
+            return {
+              ...prev,
+              buildings: [...prev.buildings, ...newBldgs]
+            };
+          });
         }
       })
       .catch(() => {});
@@ -357,9 +386,9 @@ export default function App() {
 
   // Dynamic Greeting based on current local hour in Łódź
   const greetingWord = useMemo(() => {
-    const h = liveClock.getHours();
-    if (h >= 5 && h < 12) return 'Good morning';
-    if (h >= 12 && h < 18) return 'Good afternoon';
+    const { hour } = getLodzCurrentTimeParts(liveClock);
+    if (hour >= 5 && hour < 12) return 'Good morning';
+    if (hour >= 12 && hour < 18) return 'Good afternoon';
     return 'Good evening';
   }, [liveClock]);
 
@@ -369,47 +398,34 @@ export default function App() {
   }, [liveClock, userLocation]);
 
   // Solar Position used on Screen 2 (Sunlight Path):
-  // Uses real-time current clock in Łódź by default, or the specific departure time chosen by the user
+  // Uses real-time current clock in Łódź by default, or the specific departure time chosen by the user in Europe/Warsaw timezone
   const routeSolarPos = useMemo(() => {
     if (appliedRouteTime.isNow) {
-      return liveSolarPos;
-    }
-    const d = new Date();
-    d.setHours(appliedRouteTime.hour, 0, 0, 0);
-    const pos = getCompassSolarPosition(d, userLocation[1], userLocation[0]);
-    if (pos.elevationDeg <= 4 && appliedRouteTime.hour >= 8 && appliedRouteTime.hour <= 15) {
-      const hourOffset = appliedRouteTime.hour - 12.5;
-      const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
-      const syntheticAz = Math.round(185 + hourOffset * 15);
       return {
-        ...pos,
-        elevationDeg: syntheticElev,
-        azimuthDeg: syntheticAz
+        ...liveSolarPos,
+        datetime: liveClock.toISOString()
       };
     }
-    return pos;
-  }, [appliedRouteTime, liveSolarPos, userLocation]);
+    const lodzDt = getLodzDateTime(appliedRouteTime.hour, 0);
+    const pos = getCompassSolarPosition(lodzDt.date, userLocation[1], userLocation[0]);
+    return {
+      ...pos,
+      datetime: lodzDt.isoString
+    };
+  }, [appliedRouteTime, liveSolarPos, liveClock, userLocation]);
 
   // 2. Scrubbed Time Solar Position (Used by Screen 3: "Sunny Spots at Specific Time")
   const scrubbedDate = useMemo(() => {
-    const d = new Date();
-    d.setHours(scrubbedHour, 0, 0, 0);
-    return d;
+    return getLodzDateTime(scrubbedHour, 0).date;
   }, [scrubbedHour]);
 
   const scrubbedSolarPos = useMemo(() => {
-    const pos = getCompassSolarPosition(scrubbedDate, userLocation[1], userLocation[0]);
-    if (pos.elevationDeg <= 4 && scrubbedHour >= 8 && scrubbedHour <= 15) {
-      const hourOffset = scrubbedHour - 12.5;
-      const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
-      const syntheticAz = Math.round(185 + hourOffset * 15);
-      return {
-        ...pos,
-        elevationDeg: syntheticElev,
-        azimuthDeg: syntheticAz
-      };
-    }
-    return pos;
+    const lodzDt = getLodzDateTime(scrubbedHour, 0);
+    const pos = getCompassSolarPosition(lodzDt.date, userLocation[1], userLocation[0]);
+    return {
+      ...pos,
+      datetime: lodzDt.isoString
+    };
   }, [scrubbedDate, scrubbedHour, userLocation]);
 
   // 3. Debug Screen Solar Position (Live Clock vs Custom Debug Hour)
@@ -508,7 +524,12 @@ export default function App() {
 
   // Calculate dual walking routes (Sunniest vs Shortest) with live loading indicator
   const executeRouteCalculation = useCallback(
-    async (start = startLocation, dest = destinationLocation, solar = routeSolarPos) => {
+    async (
+      start = startLocation,
+      dest = destinationLocation,
+      solar = routeSolarPos,
+      detour = maxDetourRatio
+    ) => {
       if (!start?.coordinates || !dest?.coordinates) return;
       setIsCalculatingRoute(true);
       try {
@@ -517,7 +538,8 @@ export default function App() {
           dest.coordinates,
           solar,
           osmSpatialData.buildings,
-          osmSpatialData.sidewalks
+          osmSpatialData.sidewalks,
+          detour
         );
         if (data) {
           setRouteData(data);
@@ -528,7 +550,7 @@ export default function App() {
         setIsCalculatingRoute(false);
       }
     },
-    [startLocation, destinationLocation, routeSolarPos, osmSpatialData]
+    [startLocation, destinationLocation, routeSolarPos, osmSpatialData, maxDetourRatio]
   );
 
   // Total accumulated weekly minutes (base banked + active live session)
@@ -584,20 +606,16 @@ export default function App() {
     } catch {}
   };
 
-  // Helper to compute solar position for a specific hour/now setting
+  // Helper to compute solar position for a specific hour/now setting in Europe/Warsaw timezone
   const getSolarForRouteHour = useCallback(
     (isNow, hour) => {
       if (isNow) return liveSolarPos;
-      const d = new Date();
-      d.setHours(hour, 0, 0, 0);
-      const pos = getCompassSolarPosition(d, userLocation[1], userLocation[0]);
-      if (pos.elevationDeg <= 4 && hour >= 8 && hour <= 15) {
-        const hourOffset = hour - 12.5;
-        const syntheticElev = Math.max(4, Math.round((20 - hourOffset * hourOffset * 1.1) * 10) / 10);
-        const syntheticAz = Math.round(185 + hourOffset * 15);
-        return { ...pos, elevationDeg: syntheticElev, azimuthDeg: syntheticAz };
-      }
-      return pos;
+      const lodzDt = getLodzDateTime(hour, 0);
+      const pos = getCompassSolarPosition(lodzDt.date, userLocation[1], userLocation[0]);
+      return {
+        ...pos,
+        datetime: lodzDt.isoString
+      };
     },
     [liveSolarPos, userLocation]
   );
@@ -646,7 +664,7 @@ export default function App() {
     const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
 
     // Direct routing execution on map pin — no need to click Calculate Route!
-    executeRouteCalculation(targetStart, targetDest, solarForRoute);
+    executeRouteCalculation(targetStart, targetDest, solarForRoute, maxDetourRatio);
   };
 
   // Step 1 -> Step 2 on Screen 3 (Sunny Spots): Click a spot to zoom into its Whole Sunlit Area Footprint
@@ -727,7 +745,7 @@ export default function App() {
     const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
 
     setIsEditingRoute(false);
-    executeRouteCalculation(targetStart, targetDest, solarForRoute);
+    executeRouteCalculation(targetStart, targetDest, solarForRoute, maxDetourRatio);
   };
 
   const handleSelectQuickDestination = (loc) => {
@@ -738,7 +756,7 @@ export default function App() {
       hour: routeTimeHour
     });
     const solarForRoute = getSolarForRouteHour(routeTimeIsNow, routeTimeHour);
-    executeRouteCalculation(startLocation, loc, solarForRoute);
+    executeRouteCalculation(startLocation, loc, solarForRoute, maxDetourRatio);
   };
 
   // Hidden Debug Screen trigger: tap brand header 3 times
@@ -1257,16 +1275,20 @@ export default function App() {
                           type="button"
                           className={`v22-now-btn ${routeTimeIsNow ? 'active' : ''}`}
                           onClick={() => {
+                            const { hour } = getLodzCurrentTimeParts(liveClock);
                             setRouteTimeIsNow(true);
-                            setRouteTimeHour(Math.min(16, Math.max(8, liveClock.getHours())));
+                            setRouteTimeHour(Math.min(16, Math.max(8, hour)));
                           }}
-                          title="Use current real-time sunlight"
+                          title="Use current real-time sunlight in Łódź"
                         >
                           Now
                         </button>
                         <span className="v22-editor-time-badge">
                           {routeTimeIsNow
-                            ? `Now (${String(liveClock.getHours()).padStart(2, '0')}:${String(liveClock.getMinutes()).padStart(2, '0')})`
+                            ? (() => {
+                                const { hour, minute } = getLodzCurrentTimeParts(liveClock);
+                                return `Now (${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')})`;
+                              })()
                             : (HOUR_LABELS[routeTimeHour] || `${routeTimeHour}:00`)}
                         </span>
                       </div>
@@ -1348,6 +1370,7 @@ export default function App() {
                 onMapPointPicked={handleMapPointPicked}
                 show3dBuildings={showRouter3dMap}
                 osmBuildings={osmSpatialData.buildings}
+                onZoomChange={handleMapZoomChange}
               />
 
               {/* Floating Sunlit Route Highlight Pill */}
@@ -1369,18 +1392,49 @@ export default function App() {
               {gpsToastMessage && (
                 <div className="v22-gps-toast-inline">{gpsToastMessage}</div>
               )}
-              <button
-                type="button"
-                className={`v22-floating-3d-btn ${showRouter3dMap ? 'active' : ''}`}
-                onClick={() => setShowRouter3dMap((prev) => !prev)}
-                title={
-                  showRouter3dMap
-                    ? 'Hide 2.5D/3D buildings & trees'
-                    : 'Show 2.5D/3D buildings & trees'
-                }
+              <div
+                className="v22-3d-btn-wrapper"
+                onClick={() => {
+                  if (!is3dAllowedAtCurrentZoom) {
+                    setShow3dDisabledToast(true);
+                    setTimeout(() => setShow3dDisabledToast(false), 2600);
+                  }
+                }}
               >
-                <span className="v22-3d-btn-label">3D</span>
-              </button>
+                <button
+                  type="button"
+                  className={`v22-floating-3d-btn ${showRouter3dMap && is3dAllowedAtCurrentZoom ? 'active' : ''} ${!is3dAllowedAtCurrentZoom ? 'disabled' : ''}`}
+                  disabled={!is3dAllowedAtCurrentZoom}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (is3dAllowedAtCurrentZoom) {
+                      setShowRouter3dMap((prev) => !prev);
+                    } else {
+                      setShow3dDisabledToast(true);
+                      setTimeout(() => setShow3dDisabledToast(false), 2600);
+                    }
+                  }}
+                  title={
+                    !is3dAllowedAtCurrentZoom
+                      ? '3D view disabled: Zoom in closer to street level (≥ 14.5) to enable'
+                      : showRouter3dMap
+                        ? 'Hide 2.5D/3D buildings & trees'
+                        : 'Show 2.5D/3D buildings & trees'
+                  }
+                  aria-label="Toggle 3D View in Sunlight Path"
+                >
+                  <span className="v22-3d-btn-label">3D</span>
+                </button>
+                {!is3dAllowedAtCurrentZoom && (
+                  <div
+                    className={`v22-3d-disabled-tooltip ${show3dDisabledToast ? 'visible' : ''}`}
+                    role="tooltip"
+                  >
+                    <span className="v22-3d-tooltip-icon">🔍</span>
+                    <span>Zoom in closer (≥ 14.5) to enable 3D mode</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Bottom Sheet: Pre-Start Route Selection vs. Active Live Path Session */}
@@ -1452,7 +1506,7 @@ export default function App() {
                 <div id="path-prestart">
                   <div className="v22-sheet-heading-row">
                     <span className="v22-sheet-heading">
-                      Compare Routes ({appliedRouteTime.isNow ? 'Now' : `${appliedRouteTime.hour}:00`}) (Max +20% Detour)
+                      Compare Routes ({appliedRouteTime.isNow ? 'Now' : `${appliedRouteTime.hour}:00`})
                     </span>
                   </div>
 
@@ -1563,9 +1617,9 @@ export default function App() {
                   <div className="v22-scrubber-controls">
                     <button
                       type="button"
-                      className={`v22-now-btn ${scrubbedHour === Math.min(16, Math.max(8, liveClock.getHours())) ? 'active' : ''}`}
-                      onClick={() => setScrubbedHour(Math.min(16, Math.max(8, liveClock.getHours())))}
-                      title="Adjust time to current hour"
+                      className={`v22-now-btn ${scrubbedHour === Math.min(16, Math.max(8, getLodzCurrentTimeParts(liveClock).hour)) ? 'active' : ''}`}
+                      onClick={() => setScrubbedHour(Math.min(16, Math.max(8, getLodzCurrentTimeParts(liveClock).hour)))}
+                      title="Adjust time to current hour in Łódź"
                     >
                       Now
                     </button>
@@ -1607,6 +1661,7 @@ export default function App() {
                 lodzCenterNavTrigger={lodzCenterNavTrigger}
                 solarPos={scrubbedSolarPos}
                 osmBuildings={osmSpatialData.buildings}
+                onZoomChange={setMapCurrentZoom}
               />
             </div>
 
@@ -1920,16 +1975,48 @@ export default function App() {
                   ← Exit Debug
                 </button>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <button
-                    type="button"
-                    className={`v22-now-btn ${showDebug3dMap ? 'active' : ''}`}
-                    onClick={() => setShowDebug3dMap((prev) => !prev)}
-                    title="Toggle 3D Buildings & Trees ON/OFF"
+                  <div
+                    className="v22-3d-btn-wrapper"
+                    onClick={() => {
+                      if (!is3dAllowedAtCurrentZoom) {
+                        setShow3dDisabledToast(true);
+                        setTimeout(() => setShow3dDisabledToast(false), 2600);
+                      }
+                    }}
                   >
-                    3D {showDebug3dMap ? 'ON' : 'OFF'}
-                  </button>
+                    <button
+                      type="button"
+                      className={`v22-now-btn ${showDebug3dMap && is3dAllowedAtCurrentZoom ? 'active' : ''} ${!is3dAllowedAtCurrentZoom ? 'disabled' : ''}`}
+                      disabled={!is3dAllowedAtCurrentZoom}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (is3dAllowedAtCurrentZoom) {
+                          setShowDebug3dMap((prev) => !prev);
+                        } else {
+                          setShow3dDisabledToast(true);
+                          setTimeout(() => setShow3dDisabledToast(false), 2600);
+                        }
+                      }}
+                      title={
+                        !is3dAllowedAtCurrentZoom
+                          ? '3D view disabled: Zoom in closer to street level (≥ 14.5) to enable'
+                          : 'Toggle 3D Buildings & Trees ON/OFF'
+                      }
+                    >
+                      3D {!is3dAllowedAtCurrentZoom ? 'OFF' : showDebug3dMap ? 'ON' : 'OFF'}
+                    </button>
+                    {!is3dAllowedAtCurrentZoom && (
+                      <div
+                        className={`v22-3d-disabled-tooltip ${show3dDisabledToast ? 'visible' : ''}`}
+                        role="tooltip"
+                      >
+                        <span className="v22-3d-tooltip-icon">🔍</span>
+                        <span>Zoom in closer (≥ 14.5) to enable 3D mode</span>
+                      </div>
+                    )}
+                  </div>
                   <span className="v22-debug-badge-pill">
-                    🛠️ 4 Zones ({totalBldgCount.toLocaleString()} Bldgs • {totalTreeCount.toLocaleString()} Trees)
+                    🛠️ {PILOT_ZONES.length} Zones ({totalBldgCount.toLocaleString()} Bldgs • {totalTreeCount.toLocaleString()} Trees)
                   </span>
                 </div>
               </div>
@@ -1947,7 +2034,9 @@ export default function App() {
                           ? 'Z2: Manufaktura'
                           : idx === 2
                             ? 'Z3: OFF / EC1'
-                            : 'Z4: Księży Młyn';
+                            : idx === 3
+                              ? 'Z4: Księży Młyn'
+                              : `Z${idx + 1}: ${zone.name.split(':')[1]?.trim() || zone.name}`;
                     return (
                       <button
                         key={zone.id}
@@ -2019,24 +2108,55 @@ export default function App() {
                 onInspectPoint={(coords) => setDebugInspectedPoint(coords)}
                 onHoverCoord={(coords) => setDebugHoverCoord(coords)}
                 show3dBuildings={showDebug3dMap}
+                onZoomChange={handleMapZoomChange}
               />
             </div>
 
             {/* Floating 3D Toggle Button for Debug Mode */}
             <div className="v22-above-sheet-controls">
-              <button
-                type="button"
-                className={`v22-floating-3d-btn ${showDebug3dMap ? 'active' : ''}`}
-                onClick={() => setShowDebug3dMap((prev) => !prev)}
-                title={
-                  showDebug3dMap
-                    ? 'Turn OFF 3D (Switch to Flat 2D View)'
-                    : 'Turn ON 3D (Perspective View with Extruded Buildings & Trees)'
-                }
-                aria-label="Toggle 3D Map in Debug Mode"
+              <div
+                className="v22-3d-btn-wrapper"
+                onClick={() => {
+                  if (!is3dAllowedAtCurrentZoom) {
+                    setShow3dDisabledToast(true);
+                    setTimeout(() => setShow3dDisabledToast(false), 2600);
+                  }
+                }}
               >
-                <span className="v22-3d-btn-label">3D</span>
-              </button>
+                <button
+                  type="button"
+                  className={`v22-floating-3d-btn ${showDebug3dMap && is3dAllowedAtCurrentZoom ? 'active' : ''} ${!is3dAllowedAtCurrentZoom ? 'disabled' : ''}`}
+                  disabled={!is3dAllowedAtCurrentZoom}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (is3dAllowedAtCurrentZoom) {
+                      setShowDebug3dMap((prev) => !prev);
+                    } else {
+                      setShow3dDisabledToast(true);
+                      setTimeout(() => setShow3dDisabledToast(false), 2600);
+                    }
+                  }}
+                  title={
+                    !is3dAllowedAtCurrentZoom
+                      ? '3D view disabled: Zoom in closer to street level (≥ 14.5) to enable'
+                      : showDebug3dMap
+                        ? 'Turn OFF 3D (Switch to Flat 2D View)'
+                        : 'Turn ON 3D (Perspective View with Extruded Buildings & Trees)'
+                  }
+                  aria-label="Toggle 3D Map in Debug Mode"
+                >
+                  <span className="v22-3d-btn-label">3D</span>
+                </button>
+                {!is3dAllowedAtCurrentZoom && (
+                  <div
+                    className={`v22-3d-disabled-tooltip ${show3dDisabledToast ? 'visible' : ''}`}
+                    role="tooltip"
+                  >
+                    <span className="v22-3d-tooltip-icon">🔍</span>
+                    <span>Zoom in closer (≥ 14.5) to enable 3D mode</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Bottom Diagnostic Sheet showing exact Street Point Raycast Verdict */}

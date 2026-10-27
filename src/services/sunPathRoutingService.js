@@ -5,6 +5,7 @@ import {
   inspectPointSolarShadow,
   findNearestSidewalk
 } from './osmShadowService';
+import { getBackendBaseUrl } from './apiConfig';
 
 /**
  * Standard preset destinations and transit hubs across central Łódź
@@ -496,6 +497,133 @@ function getRankedSunnyWaypoints(
   return candidates.map((c) => c.wp);
 }
 
+export function adaptBackendRouteResponse(data) {
+  const isNighttime = data.solar_position?.is_nighttime ?? false;
+  const shortest = data.shortest_route;
+  const sunny = data.sunny_route;
+
+  const shortestCoords = shortest.geojson.geometry.coordinates;
+  const sunnyCoords = sunny.geojson.geometry.coordinates;
+
+  const shortestMidpoint = getRouteMidpoint(shortestCoords);
+  const sunnyMidpoint = getRouteMidpoint(sunnyCoords);
+
+  const shortestGeoJson = {
+    type: 'Feature',
+    id: 'route-shortest',
+    properties: {
+      routeType: 'shortest',
+      name: 'Shortest Path (Direct)',
+      color: '#38bdf8',
+      glowColor: '#0ea5e9',
+      distanceMeters: shortest.distance_meters,
+      walkMinutes: shortest.walk_minutes,
+      sunPercent: shortest.sun_percent,
+      sunMinutes: shortest.sun_minutes,
+      shadeMinutes: shortest.shade_minutes,
+      photopicLuxAvg: shortest.photopic_lux_avg
+    },
+    geometry: shortest.geojson.geometry
+  };
+
+  const shortestRoute = {
+    id: 'shortest',
+    routeType: 'shortest',
+    name: 'Shortest Path (Direct Line)',
+    badgeLabel: 'Direct Line',
+    color: '#38bdf8',
+    glowColor: '#0ea5e9',
+    totalDistanceMeters: shortest.distance_meters,
+    distanceMeters: shortest.distance_meters,
+    walkMinutes: shortest.walk_minutes,
+    sunPercent: shortest.sun_percent,
+    sunMinutes: shortest.sun_minutes,
+    shadeMinutes: shortest.shade_minutes,
+    photopicLuxAvg: shortest.photopic_lux_avg,
+    isNighttime,
+    segments: shortest.segments,
+    geoJson: shortestGeoJson,
+    rawCoordinates: shortestCoords,
+    midpoint: shortestMidpoint
+  };
+
+  const isSameAsShortest =
+    sunny.distance_meters === shortest.distance_meters &&
+    sunny.sun_percent === shortest.sun_percent;
+
+  const sunnyGeoJson = {
+    type: 'Feature',
+    id: 'route-sunny',
+    properties: {
+      routeType: 'sunny',
+      name: isNighttime
+        ? 'Sunniest Path (Nighttime — Equal to Shortest)'
+        : 'The Sunny Walk (Daylight Maximized)',
+      color: '#fbbf24',
+      glowColor: '#f59e0b',
+      distanceMeters: sunny.distance_meters,
+      walkMinutes: sunny.walk_minutes,
+      sunPercent: sunny.sun_percent,
+      sunMinutes: sunny.sun_minutes,
+      shadeMinutes: sunny.shade_minutes,
+      photopicLuxAvg: sunny.photopic_lux_avg,
+      viaName: isSameAsShortest ? 'Direct Path' : 'Sunniest Pedestrian Corridor',
+      isSameAsShortest,
+      isNighttime
+    },
+    geometry: sunny.geojson.geometry
+  };
+
+  const sunnyRoute = {
+    id: 'sunny',
+    routeType: 'sunny',
+    name: isNighttime ? 'Sunniest Walk (Equal to Shortest at Night)' : 'The Sunny Walk',
+    badgeLabel: isNighttime ? 'Nighttime (0%)' : isSameAsShortest ? 'Optimal Direct' : 'Recommended',
+    color: '#fbbf24',
+    glowColor: '#f59e0b',
+    viaName: isSameAsShortest ? 'Direct Path (Equal to Shortest)' : 'Sunniest Pedestrian Corridor',
+    isSameAsShortest,
+    isNighttime,
+    totalDistanceMeters: sunny.distance_meters,
+    distanceMeters: sunny.distance_meters,
+    walkMinutes: sunny.walk_minutes,
+    sunPercent: sunny.sun_percent,
+    sunMinutes: sunny.sun_minutes,
+    shadeMinutes: sunny.shade_minutes,
+    photopicLuxAvg: sunny.photopic_lux_avg,
+    segments: sunny.segments,
+    geoJson: sunnyGeoJson,
+    rawCoordinates: sunnyCoords,
+    midpoint: sunnyMidpoint
+  };
+
+  const deltaMeters = Math.max(0, sunny.distance_meters - shortest.distance_meters);
+  const detourPercent =
+    shortest.distance_meters > 0
+      ? Math.round((deltaMeters / shortest.distance_meters) * 100)
+      : 0;
+  const deltaWalkMinutes = Math.max(0, sunny.walk_minutes - shortest.walk_minutes);
+  const extraSunMinutes = Math.max(0, sunny.sun_minutes - shortest.sun_minutes);
+
+  return {
+    shortestRoute,
+    sunnyRoute,
+    parkRoute: null,
+    allRoutes: [sunnyRoute, shortestRoute],
+    isNighttime,
+    comparison: {
+      deltaMeters,
+      detourPercent,
+      deltaWalkMinutes,
+      extraSunMinutes,
+      photonRatio:
+        shortest.photopic_lux_avg > 0
+          ? (sunny.photopic_lux_avg / shortest.photopic_lux_avg).toFixed(1)
+          : '1.0'
+    }
+  };
+}
+
 /**
  * Generates walking routes between start (A) and end (B):
  * - Evaluates all candidate paths and guarantees `shortestRoute` is strictly the minimum-distance path.
@@ -508,6 +636,7 @@ function getRankedSunnyWaypoints(
  * @param {{ azimuthDeg: number, elevationDeg: number }} solarPos
  * @param {Array} buildingsList Optional live OSM buildings + trees
  * @param {Array} sidewalksList Optional live OSM sidewalks
+ * @param {number} maxDetourRatio Optional detour ratio (default 1.20, clamped <= 1.50)
  * @returns {Promise<{ shortestRoute: object, sunnyRoute: object, parkRoute?: object, allRoutes: object[], comparison: object }>}
  */
 export async function calculateDualRoutes(
@@ -515,11 +644,34 @@ export async function calculateDualRoutes(
   endCoord,
   solarPos,
   buildingsList = VERIFIED_REAL_OSM_BUILDINGS,
-  sidewalksList = VERIFIED_REAL_OSM_SIDEWALKS
+  sidewalksList = VERIFIED_REAL_OSM_SIDEWALKS,
+  maxDetourRatio = 1.20
 ) {
+  // 1. Attempt high-performance Python FastAPI backend calculation first
+  const backendBaseUrl = getBackendBaseUrl();
+  try {
+    const res = await fetch(`${backendBaseUrl}/api/v1/routes/calculate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start: startCoord,
+        destination: endCoord,
+        datetime: solarPos?.datetime || new Date().toISOString(),
+        max_detour_ratio: Math.min(1.50, Math.max(1.00, Number(maxDetourRatio) || 1.20))
+      }),
+      signal: AbortSignal.timeout(6000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return adaptBackendRouteResponse(data);
+    }
+  } catch {
+    // Graceful fallback to client calculations if backend is offline
+  }
+
   const isNighttime = !solarPos || solarPos.elevationDeg <= 0;
 
-  // 1. Build candidate pool starting with the direct A -> B route
+  // 2. Client fallback: Build candidate pool starting with the direct A -> B route
   const directRaw = await fetchWalkingRouteCoords(startCoord, endCoord, null);
   const directAnalysis = analyzeRouteSolarExposure(
     directRaw.coordinates,

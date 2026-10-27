@@ -1,6 +1,7 @@
 import SunCalc from 'suncalc';
 import { getDistanceMeters, isPointInPolygon } from '../utils/geoUtils.js';
 import lodzOsmPilotZones from '../data/lodzOsmPilotZones.json';
+import { getBackendBaseUrl } from './apiConfig';
 
 export const PILOT_ZONES = lodzOsmPilotZones.pilotZones || [];
 export const PILOT_ZONES_STATS = lodzOsmPilotZones.stats || {
@@ -525,18 +526,44 @@ export function findPilotZoneForPoint(point) {
  * or serves the pre-bundled 4-Zone Łódź OSM dataset (3,221 buildings, 2,755 trees, 5,854 sidewalks)
  * immediately when inside any of the 4 pilot zones.
  */
-export async function fetchLiveOsmSpatialData(centerCoord = [19.4574, 51.7678], radiusMeters = 350) {
-  const matchedZone = findPilotZoneForPoint(centerCoord);
-  if (matchedZone && VERIFIED_REAL_OSM_BUILDINGS.length > 500) {
-    return {
-      buildings: VERIFIED_REAL_OSM_BUILDINGS,
-      sidewalks: VERIFIED_REAL_OSM_SIDEWALKS,
-      source: 'bundled-4-zones',
-      activeZone: matchedZone
-    };
+export async function fetchLiveOsmSpatialData(centerCoord = [19.4574, 51.7678], radiusMeters = 400) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const [lng, lat] = centerCoord;
+  const metersPerDegLat = 111320.0;
+  const metersPerDegLng = 111320.0 * Math.cos((lat * Math.PI) / 180);
+  const dLng = radiusMeters / metersPerDegLng;
+  const dLat = radiusMeters / metersPerDegLat;
+  const bbox = `${(lng - dLng).toFixed(5)},${(lat - dLat).toFixed(5)},${(lng + dLng).toFixed(5)},${(lat + dLat).toFixed(5)}`;
+
+  // 1. Attempt high-speed Python FastAPI backend query (< 10ms)
+  try {
+    const res = await fetch(`${backendBaseUrl}/api/v1/spatial/obstacles?bbox=${bbox}`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.features && data.features.length > 0) {
+        const liveBuildings = data.features.map((f) => ({
+          id: f.id,
+          name: f.properties.name,
+          address: f.properties.address || 'Łódź',
+          heightMeters: f.properties.height_meters,
+          levels: f.properties.levels || 4,
+          roofType: f.properties.roof_type || 'flat/pitched',
+          type: f.properties.type || 'building',
+          polygon: f.geometry.coordinates[0]
+        }));
+        return {
+          buildings: liveBuildings,
+          sidewalks: VERIFIED_REAL_OSM_SIDEWALKS,
+          source: 'fastapi-spatial-engine'
+        };
+      }
+    }
+  } catch {
+    // Fallback to Overpass or verified landmarks below
   }
 
-  const [lng, lat] = centerCoord;
   const query = `[out:json][timeout:6];(way["building"](around:${radiusMeters},${lat},${lng});node["natural"="tree"](around:${radiusMeters},${lat},${lng});way["natural"~"tree_row|wood"](around:${radiusMeters},${lat},${lng});way["highway"~"footway|pedestrian|living_street|path"](around:${radiusMeters},${lat},${lng}););out body geom 90;`;
   const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
