@@ -288,6 +288,85 @@ const VERIFIED_REAL_LODZ_BENCHES = [
     azimuthRange: [115, 245],
     windShielding: 'Medium',
     description: 'Open sunny glade along the former riverbed of the Łódka. Direct sunlight from 10:00 to 15:30.'
+  },
+  {
+    id: 'lodz-real-bench-retkinia',
+    name: 'Błonia Retkińskie Promenade Bench',
+    category: 'bench',
+    categoryLabel: 'Retkinia Green Belt Bench',
+    coordinates: [19.3940, 51.7530],
+    seatingType: 'Modern timber promenade bench',
+    skyViewFactor: 0.93,
+    minSunElevation: 10,
+    azimuthRange: [120, 240],
+    windShielding: 'Low to Medium',
+    description: 'Wide open green belt along al. Wyszyńskiego in Retkinia with uninterrupted southern horizon.'
+  },
+  {
+    id: 'lodz-real-bench-julianow',
+    name: 'Park Julianowski Pond Bench',
+    category: 'park',
+    categoryLabel: 'Julianów Lakeside Bench',
+    coordinates: [19.4445, 51.7985],
+    seatingType: 'Classic green wooden bench',
+    skyViewFactor: 0.90,
+    minSunElevation: 11,
+    azimuthRange: [120, 235],
+    windShielding: 'Medium',
+    description: 'Scenic lakeside bench in Park Julianowski facing the open water cascade.'
+  },
+  {
+    id: 'lodz-real-bench-monopolis',
+    name: 'Monopolis Patio Sun Bench',
+    category: 'courtyard',
+    categoryLabel: 'Monopolis Amphitheater Bench',
+    coordinates: [19.4892, 51.7642],
+    seatingType: 'Industrial hardwood amphitheater seating',
+    skyViewFactor: 0.82,
+    minSunElevation: 14,
+    azimuthRange: [140, 220],
+    windShielding: 'High (brick factory enclosure)',
+    description: 'Sheltered sun terrace in the Monopolis courtyard with zero wind and warm radiant brickwork.'
+  },
+  {
+    id: 'lodz-real-bench-widzewski',
+    name: 'Park Widzewski Lakeside Bench',
+    category: 'park',
+    categoryLabel: 'Widzew Lakeside Bench',
+    coordinates: [19.5045, 51.7655],
+    seatingType: 'Wooden bench by the willow pond',
+    skyViewFactor: 0.91,
+    minSunElevation: 11,
+    azimuthRange: [120, 240],
+    windShielding: 'Medium',
+    description: 'Tranquil pond bench in central Widzew capturing reflection of midday sunlight.'
+  },
+  {
+    id: 'lodz-real-bench-reymont',
+    name: 'Park Reymonta Geyer Bench',
+    category: 'park',
+    categoryLabel: 'Biała Fabryka Garden Bench',
+    coordinates: [19.4618, 51.7450],
+    seatingType: 'Cast-iron heritage park bench',
+    skyViewFactor: 0.90,
+    minSunElevation: 12,
+    azimuthRange: [125, 235],
+    windShielding: 'High (buffered by museum walls)',
+    description: 'Scenic park bench opposite Biała Fabryka in Górna facing the open Geyer pond.'
+  },
+  {
+    id: 'lodz-real-bench-stefanski',
+    name: 'Stawy Stefańskiego Pier Bench',
+    category: 'waterfront',
+    categoryLabel: 'Lakeside Pier Bench',
+    coordinates: [19.4455, 51.7048],
+    seatingType: 'Wooden pier sun recliner',
+    skyViewFactor: 0.97,
+    minSunElevation: 7,
+    azimuthRange: [100, 260],
+    seatingType: 'Wooden beach recliner on sandy pier',
+    windShielding: 'Low (open lake breeze)',
+    description: 'Lakeside sun pier in Ruda Pabianicka with pristine full-sky solar exposure.'
   }
 ];
 
