@@ -2250,16 +2250,79 @@ button {
 
 /* Screen 3 Step 2: Whole Sunlit Area Footprint Badge on Zoomed Polygon */
 .v22-whole-area-badge {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 9px 13px;
+  padding: 9px 26px 9px 13px;
   border-radius: 20px;
-  background: rgba(254, 243, 199, 0.92);
+  background: rgba(254, 243, 199, 0.94);
   border: 2px solid var(--amber-500);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+.v22-badge-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(146, 64, 14, 0.14);
+  color: #92400E;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  pointer-events: auto;
+  z-index: 10;
+}
+
+.v22-badge-close-btn:hover {
+  background: rgba(146, 64, 14, 0.28);
+  color: #78350F;
+  transform: scale(1.12);
+}
+
+.v22-whole-area-badge.shaded .v22-badge-close-btn {
+  background: rgba(100, 116, 139, 0.2);
+  color: #334155;
+}
+
+.v22-whole-area-badge.shaded .v22-badge-close-btn:hover {
+  background: rgba(100, 116, 139, 0.35);
+  color: #0F172A;
+}
+
+.v22-sheet-close-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: #E2E8F0;
+  color: #475569;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 6px;
+}
+
+.v22-sheet-close-btn:hover {
+  background: #CBD5E1;
+  color: #0F172A;
+  transform: scale(1.08);
 }
 
 .v22-whole-area-badge.shaded {

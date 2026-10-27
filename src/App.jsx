@@ -174,6 +174,7 @@ export default function App() {
   const [isEditingRoute, setIsEditingRoute] = useState(false);
   const [isPickingMapPoint, setIsPickingMapPoint] = useState(null);
   const [showRouter3dMap, setShowRouter3dMap] = useState(false); // ON/OFF toggle for 2.5D/3D buildings & trees on Sunlight Path
+  const [showSpots3dMap, setShowSpots3dMap] = useState(false); // ON/OFF toggle for 2.5D/3D buildings & trees on Sunny Spots
   const [mapCurrentZoom, setMapCurrentZoom] = useState(14.3);
   const is3dAllowedAtCurrentZoom = mapCurrentZoom >= 14.5;
   const [show3dDisabledToast, setShow3dDisabledToast] = useState(false);
@@ -184,6 +185,7 @@ export default function App() {
     setMapCurrentZoom(newZoom);
     if (newZoom < 14.5) {
       setShowRouter3dMap(false);
+      setShowSpots3dMap(false);
       setShowDebug3dMap(false);
     }
   }, []);
@@ -1705,15 +1707,60 @@ export default function App() {
                 lodzCenterNavTrigger={lodzCenterNavTrigger}
                 solarPos={scrubbedSolarPos}
                 osmBuildings={osmSpatialData.buildings}
-                onZoomChange={setMapCurrentZoom}
+                show3dBuildings={showSpots3dMap}
+                onZoomChange={handleMapZoomChange}
               />
             </div>
 
-            {/* FLOATING GPS LOCATE-ME BUTTON (Directly above the Bottom Sheet) */}
+            {/* FLOATING 3D VIEW & GPS LOCATE-ME CONTROLS (Directly above the Bottom Sheet) */}
             <div className="v22-above-sheet-controls">
               {gpsToastMessage && (
                 <div className="v22-gps-toast-inline">{gpsToastMessage}</div>
               )}
+              <div
+                className="v22-3d-btn-wrapper"
+                onClick={() => {
+                  if (!is3dAllowedAtCurrentZoom) {
+                    setShow3dDisabledToast(true);
+                    setTimeout(() => setShow3dDisabledToast(false), 2600);
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  id="btn-spots-3d"
+                  className={`v22-floating-3d-btn ${showSpots3dMap && is3dAllowedAtCurrentZoom ? 'active' : ''} ${!is3dAllowedAtCurrentZoom ? 'disabled' : ''}`}
+                  disabled={!is3dAllowedAtCurrentZoom}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (is3dAllowedAtCurrentZoom) {
+                      setShowSpots3dMap((prev) => !prev);
+                    } else {
+                      setShow3dDisabledToast(true);
+                      setTimeout(() => setShow3dDisabledToast(false), 2600);
+                    }
+                  }}
+                  title={
+                    !is3dAllowedAtCurrentZoom
+                      ? '3D view disabled: Zoom in closer to street level (≥ 14.5) to enable'
+                      : showSpots3dMap
+                        ? 'Hide 2.5D/3D buildings & trees'
+                        : 'Show 2.5D/3D buildings & trees'
+                  }
+                  aria-label="Toggle 3D View in Sunny Spots"
+                >
+                  <span className="v22-3d-btn-label">3D</span>
+                </button>
+                {!is3dAllowedAtCurrentZoom && (
+                  <div
+                    className={`v22-3d-disabled-tooltip ${show3dDisabledToast ? 'visible' : ''}`}
+                    role="tooltip"
+                  >
+                    <span className="v22-3d-tooltip-icon">🔍</span>
+                    <span>Zoom in closer (≥ 14.5) to enable 3D mode</span>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 id="btn-spots-gps"
@@ -1787,9 +1834,20 @@ export default function App() {
                     >
                       ← All Nearby Places
                     </button>
-                    <span className="v22-distance-pill-blue">
-                      {viewingSpotDistance}m from you
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="v22-distance-pill-blue">
+                        {viewingSpotDistance}m from you
+                      </span>
+                      <button
+                        type="button"
+                        className="v22-sheet-close-btn"
+                        onClick={handleDeselectSpot}
+                        title="Close spot details and return to overview"
+                        aria-label="Close spot details"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
 
                   <div className="v22-area-detail-body">

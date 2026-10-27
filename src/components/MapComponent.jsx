@@ -55,10 +55,15 @@ export default function MapComponent({
   const onHoverCoordRef = useRef(onHoverCoord);
   const onDeselectSpotRef = useRef(onDeselectSpot);
   const onZoomChangeRef = useRef(onZoomChange);
+  const show3dBuildingsRef = useRef(show3dBuildings);
 
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
   }, [onZoomChange]);
+
+  useEffect(() => {
+    show3dBuildingsRef.current = show3dBuildings;
+  }, [show3dBuildings]);
 
   // Track when the MapLibre style & canvas are ready so layers ALWAYS render
   const [isMapReady, setIsMapReady] = useState(false);
@@ -275,7 +280,7 @@ export default function MapComponent({
 
     const focusPointForShadows = isDebugView
       ? inspectionResult?.point || [19.4574, 51.7678]
-      : routeData?.sunnyRoute?.midpoint || userLocation || [19.4574, 51.7678];
+      : viewingSpotArea?.coordinates || routeData?.sunnyRoute?.midpoint || userLocation || [19.4574, 51.7678];
 
     const shadowsGeoJson = shouldShow3d
       ? generateAllBuildingShadowsGeoJson(
@@ -962,6 +967,7 @@ export default function MapComponent({
       const el = document.createElement('div');
       el.className = `v22-whole-area-badge ${isSunny ? 'sunny' : 'shaded'}`;
       el.innerHTML = `
+        <button type="button" class="v22-badge-close-btn" title="Close footprint and return to overview" aria-label="Close footprint">×</button>
         <div class="v22-area-eyebrow">Whole Sunlit Area Footprint</div>
         <div class="v22-area-title-pill">${isSunny ? '☀️' : '☁️'} ${viewingSpotArea.name.split(' (')[0]}</div>
         <div class="v22-area-meta">${
@@ -971,6 +977,19 @@ export default function MapComponent({
         }</div>
         <div class="v22-area-benches-pill">🪑 ${viewingSpotArea.benchesCount || 6} Benches in Area</div>
       `;
+
+      // Interactive close button to dismiss the whole sunlit area modal
+      const closeBtn = el.querySelector('.v22-badge-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (onDeselectSpotRef.current) {
+            onDeselectSpotRef.current();
+          }
+        });
+      }
+
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat(viewingSpotArea.coordinates)
         .addTo(map);
@@ -1040,18 +1059,20 @@ export default function MapComponent({
   ]);
 
   // Camera transitions in Screen 3:
-  // - When viewingSpotArea is selected: zoom into the Whole Sunlit Area Footprint with 3D pitch
+  // - When viewingSpotArea is selected: zoom into the Whole Sunlit Area Footprint
+  // - If 3D mode is active, smoothly tilt camera; if 2D, stay top-down
   // - When returning to Neighborhood Overview (viewingSpotArea === null): DO NOT force fly to GPS location!
   //   Instead, smoothly reset tilt & bearing to 0 at the current view.
   useEffect(() => {
     if (!mapRef.current || !isMapReady || activeMode !== 'spots') return;
 
     if (viewingSpotArea && viewingSpotArea.coordinates) {
+      const is3dActive = Boolean(show3dBuildingsRef.current);
       mapRef.current.flyTo({
         center: viewingSpotArea.coordinates,
         zoom: 16.6,
-        pitch: 42,
-        bearing: -10,
+        pitch: is3dActive ? 46 : 0,
+        bearing: is3dActive ? -12 : 0,
         offset: [0, -25],
         duration: 650
       });
@@ -1080,10 +1101,10 @@ export default function MapComponent({
     });
   }, [lodzCenterNavTrigger, isMapReady, activeMode]);
 
-  // 2.5D / 3D Camera Tilt Toggle in Screen 2 (Sunlight Path) & Screen 5 (Debug Tool)
+  // 2.5D / 3D Camera Tilt Toggle in Screen 2 (Sunlight Path), Screen 3 (Sunny Spots) & Screen 5 (Debug Tool)
   useEffect(() => {
     if (!mapRef.current || !isMapReady) return;
-    if (activeMode !== 'router' && activeMode !== 'debug') return;
+    if (activeMode !== 'router' && activeMode !== 'spots' && activeMode !== 'debug') return;
     const is3dActive = Boolean(show3dBuildings) && mapZoom >= 14.5;
     mapRef.current.easeTo({
       pitch: is3dActive ? 46 : 0,
@@ -1095,11 +1116,12 @@ export default function MapComponent({
   // Explicit GPS Recenter Button Trigger
   useEffect(() => {
     if (!mapRef.current || !isMapReady || !gpsRecenterTrigger || !userLocation) return;
+    const is3dActive = (activeMode === 'router' || activeMode === 'spots') && show3dBuildings;
     mapRef.current.flyTo({
       center: userLocation,
-      zoom: activeMode === 'router' && show3dBuildings ? 15.8 : 14.8,
-      pitch: activeMode === 'router' && show3dBuildings ? 46 : 0,
-      bearing: activeMode === 'router' && show3dBuildings ? -12 : 0,
+      zoom: is3dActive ? 15.8 : 14.8,
+      pitch: is3dActive ? 46 : 0,
+      bearing: is3dActive ? -12 : 0,
       duration: 600
     });
   }, [gpsRecenterTrigger, isMapReady, userLocation, activeMode, show3dBuildings]);
